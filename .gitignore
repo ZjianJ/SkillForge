@@ -1,0 +1,65 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+site/
+.pytest_cache/
+.ruff_cache/
+
+# Local datasets: keep only documented split manifests in git.
+data/*
+!data/README.md
+!data/searchqa_id_split/
+!data/searchqa_id_split/**
+!data/livemathematicianbench_id_split/
+!data/livemathematicianbench_id_split/**
+!data/docvqa_id_split/
+!data/docvqa_id_split/**
+!data/officeqa_id_split/
+!data/officeqa_id_split/**
+!data/spreadsheetbench_id_split/
+!data/spreadsheetbench_id_split/**
+!data/alfworld_path_split/
+!data/alfworld_path_split/**
+
+# Generated experiment artifacts.
+outputs/
+rollouts/
+logs/
+external/
+.gradio/
+
+# Local benchmark checkouts and corpora.
+/BabyVision/
+/MMRB/
+/SpreadsheetBench/
+/dl4ir-searchQA/
+
+# Local configuration and secrets.
+configs/local/
+configs/**/*.local.yaml
+*.local.md
+*.secret.md
+*.bak
+.env
+.secrets/
+.codex_azure*/
+.venv
+
+# Internal docs and paper/reproduction notes not intended for code release.
+docs/ablation_plan.md
+docs/ablation_paper_tables.md
+docs/ablation_paper_tables.html
+docs/experiment_commands.md
+docs/slow_update_flowchart.md
+docs/session_memory.md
+docs/harness_fresh_machine_handoff.md
+docs/harness_monitoring_memory.md
+docs/harness_reproduction_secrets.secret.md
+docs/reflact_conda_env_export.yml
+docs/reflact_overview.html
+docs/render_ablation_paper_tables.py
+docs/让*
+ENV_CHANGES.md
+soft-skill/

@@ -1,0 +1,68 @@
+_base_: default.yaml
+
+# Supervised soft-prefix tuning for OfficeQA.
+# This keeps the backbone frozen and trains only a prefix embedding inserted
+# before the prompt embeddings.
+#
+# Rollout strategy (trajectory_sft):
+#   The trajectory collection step uses a vLLM-served instance of the same
+#   model, queried via the qwen_chat backend.  This reuses the full SkillOpt
+#   rollout pipeline (glob/read/grep local tools, multi-turn), identical to
+#   the original ReflACT flow except:
+#     1. No proprietary model — the local open-weight model is used.
+#     2. By default skill_content="" (plain inference). Set trajectory_use_skill: true
+#        to inject init_text_path (e.g. skills/initial.md) like normal OfficeQA rollout.
+#   Start vLLM before training (Qwen3.5 needs qwen3_coder, not hermes):
+#     vllm serve Qwen/Qwen3.5-4B --port 8000 --enable-auto-tool-choice \
+#       --tool-call-parser qwen3_coder
+
+model:
+  target: Qwen/Qwen3.5-4B
+  target_backend: qwen_chat
+  target_qwen_chat_base_url: http://127.0.0.1:8000/v1
+  target_qwen_chat_api_key: dummy
+  target_qwen_chat_temperature: 0.7
+  target_qwen_chat_timeout_seconds: 300
+  target_qwen_chat_max_tokens: 1024
+  target_qwen_chat_enable_thinking: false
+
+train:
+  num_epochs: 3
+  batch_size: 1
+  accumulation: 2
+
+evaluation:
+  gate_metric: soft
+  sel_env_num: 64
+  test_env_num: 0
+
+env:
+  use_local_tools: true
+
+soft_prefix:
+  inference_backend: vllm_prompt_embeds
+  inference_base_url: http://127.0.0.1:8000
+  inference_timeout_seconds: 300
+  model_name: Qwen/Qwen3.5-4B
+  prefix_length: 32
+  learning_rate: 0.001
+  weight_decay: 0.0
+  max_prompt_tokens: 16384
+  max_target_tokens: 1024
+  max_new_tokens: 1024
+  trajectory_max_new_tokens: 16384
+  torch_dtype: auto
+  device: auto
+  trust_remote_code: false
+  init_text_path: skillopt/envs/officeqa/skills/initial.md
+  generation_temperature: 0.0
+  training_data: trajectory_sft
+  trajectory_use_skill: true
+  trajectory_rollout_backend: vllm
+  trajectory_rollout_dir: rollouts/plain_qwen35_officeqa_rollouts
+  trajectory_min_hard: 1.0
+  trajectory_min_soft: 0.0
+  trajectory_max_examples: 0
+  trajectory_max_new_tokens: 16384
+  trajectory_max_context_chars: 30000
+  strip_trajectory_thoughts: true

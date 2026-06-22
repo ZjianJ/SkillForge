@@ -1,0 +1,33 @@
+_base_: default.yaml
+
+# MVP: supervised soft-prefix tuning for SearchQA.
+# This keeps the backbone frozen and trains only a prefix embedding inserted
+# before the prompt embeddings. Use an open-weight causal LM available locally
+# or from Hugging Face.
+
+train:
+  num_epochs: 3
+  batch_size: 8
+  accumulation: 1
+
+evaluation:
+  gate_metric: soft
+  sel_env_num: 64
+  test_env_num: 0
+
+soft_prefix:
+  model_name: Qwen/Qwen3.5-4B
+  prefix_length: 32
+  learning_rate: 0.001
+  weight_decay: 0.0
+  max_prompt_tokens: 2048
+  max_target_tokens: 64
+  max_new_tokens: 64
+  torch_dtype: auto
+  device: auto
+  trust_remote_code: false
+  init_text_path: skillopt/envs/searchqa/skills/initial.md
+  generation_temperature: 0.0
+  inference_backend: vllm_prompt_embeds
+  inference_base_url: http://127.0.0.1:8000
+  inference_timeout_seconds: 300

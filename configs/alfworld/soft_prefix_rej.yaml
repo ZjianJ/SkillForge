@@ -1,0 +1,26 @@
+_base_: soft_prefix.yaml
+model:
+  target: Qwen/Qwen3.5-4B
+  target_backend: qwen_chat
+  target_qwen_chat_base_url: http://127.0.0.1:8010/v1
+  target_qwen_chat_api_key: dummy
+  target_qwen_chat_temperature: 0.7
+  target_qwen_chat_timeout_seconds: 300
+  target_qwen_chat_max_tokens: 16384
+  target_qwen_chat_enable_thinking: false
+env:
+  max_api_workers: 1
+soft_prefix:
+  inference_backend: vllm_prompt_embeds
+  inference_base_url: http://127.0.0.1:8010
+  inference_timeout_seconds: 300
+  training_data: trajectory_sft
+  trajectory_rollout_backend: openai_compatible
+  trajectory_rollout_dir: rollouts/plain_qwen35_alfworld_rollouts
+  trajectory_min_hard: 1.0
+  trajectory_min_soft: 0.0
+  trajectory_use_skill: true
+  trajectory_rollouts_per_task: 3
+  trajectory_max_examples: 0
+  trajectory_max_new_tokens: 32768
+  trajectory_max_context_chars: 30000

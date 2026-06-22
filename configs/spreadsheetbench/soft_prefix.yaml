@@ -1,0 +1,63 @@
+_base_: default.yaml
+
+# Trajectory SFT for SpreadsheetBench.
+#
+# SpreadsheetBench is agentic because the teacher must generate Python, execute it
+# against workbooks, and use the execution/eval trace as trajectory evidence.  This
+# config reuses the existing codegen rollout pipeline in
+# skillopt/envs/spreadsheetbench/rollout.py.
+#
+# Start vLLM before training, for example:
+#   vllm serve Qwen/Qwen3.5-4B --port 8000
+
+model:
+  target: Qwen/Qwen3.5-4B
+  target_backend: qwen_chat
+  target_qwen_chat_base_url: http://127.0.0.1:8000/v1
+  target_qwen_chat_api_key: dummy
+  target_qwen_chat_temperature: 0.7
+  target_qwen_chat_timeout_seconds: 600
+  target_qwen_chat_max_tokens: 16384
+  target_qwen_chat_enable_thinking: false
+
+train:
+  num_epochs: 3
+  batch_size: 2
+  accumulation: 1
+
+evaluation:
+  gate_metric: soft
+  sel_env_num: 16
+  test_env_num: 0
+
+env:
+  workers: 8
+
+soft_prefix:
+  inference_backend: vllm_prompt_embeds
+  inference_base_url: http://127.0.0.1:8000
+  inference_timeout_seconds: 600
+  model_name: Qwen/Qwen3.5-4B
+  prefix_length: 32
+  learning_rate: 0.001
+  weight_decay: 0.0
+  max_prompt_tokens: 16384
+  max_target_tokens: 8192
+  max_new_tokens: 8192
+  trajectory_max_new_tokens: 16384
+  torch_dtype: auto
+  device: auto
+  trust_remote_code: false
+  init_text_path: skillopt/envs/spreadsheetbench/skills/initial.md
+  generation_temperature: 0.0
+  training_data: trajectory_sft
+  rewind_ckpt: false
+  trajectory_use_skill: true
+  trajectory_rollout_backend: vllm
+  trajectory_rollout_dir: rollouts/plain_qwen35_spreadsheetbench_rollouts
+  trajectory_min_hard: 1.0
+  trajectory_min_soft: 0.0
+  trajectory_max_examples: 0
+  trajectory_rollouts_per_task: 1
+  trajectory_max_context_chars: 30000
+  strip_trajectory_thoughts: true
