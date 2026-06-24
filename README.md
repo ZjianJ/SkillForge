@@ -4,9 +4,36 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](pyproject.toml)
 
-SoftSkill turns natural-language agent skills into compact, trainable **soft skills** for frozen open-weight language models. Instead of re-reading a long Markdown skill at inference time, a model can condition on a short learned prefix that captures task-specific behavior while keeping the backbone frozen.
+**Behavioral compression for contextual adaptation.** SoftSkill turns a natural-language skill file into a compact, trainable soft prefix for a frozen language model. Instead of asking the model to re-read hundreds or thousands of Markdown tokens at inference time, SoftSkill learns a short latent context that biases the model toward the answer style, evidence-use habits, and task procedures that worked during supervision.
 
-This repository contains the public training and evaluation stack used for the SoftSkill release: SoftSkill training, prompt-embedding serving, transfer utilities, benchmark integrations, and compatibility entry points under the `skillopt` Python package.
+<p align="center">
+  <img src="docs/assets/softskill-teaser.png" alt="SoftSkill method overview" width="95%">
+</p>
+
+SoftSkill keeps the backbone model frozen. It initializes a prefix from a readable skill document, trains only a small soft delta with next-token prediction over answers or successful trajectories, and selects deployed checkpoints by held-out task validation. The result is a reusable soft-skill artifact that can replace long prompt-side skill text at inference time.
+
+## Why SoftSkill?
+
+Modern agent systems increasingly rely on skill files, memories, or procedural instructions that tell a model how to inspect evidence, call tools, verify outputs, and avoid task-specific failure modes. These textual skills are portable and editable, but the model still has to translate them into behavior every time they are loaded.
+
+SoftSkill asks a simple question: **can useful task behavior be internalized into a short continuous context while leaving the model weights untouched?** In the main QA setting, a length-32 SoftSkill prefix on `Qwen/Qwen3.5-4B` improves over no-skill prompting by 8.3 points on SearchQA, 42.1 points on LiveMath, and 1.3 points on DocVQA. Relative to SkillOpt text skills, SoftSkill improves accuracy by 5.2 points on SearchQA and 12.5 points on LiveMath while replacing long Markdown skill files with 32 virtual tokens.
+
+<p align="center">
+  <img src="docs/assets/qa-compression-diagnostics.png" alt="SoftSkill compression diagnostics for QA tasks" width="95%">
+</p>
+
+## Repository Overview
+
+This repository contains the public training and evaluation stack used for the SoftSkill release:
+
+- SoftSkill prefix training and validation-selected checkpoint export.
+- Prompt-embedding serving support for vLLM-style evaluation.
+- Benchmark integrations for SearchQA, LiveMath, DocVQA, OfficeQA, SpreadsheetBench, and ALFWorld.
+- Baseline and ablation configs for no-skill, hard-skill, LoRA, and soft-prefix runs.
+- Compatibility entry points under the `skillopt` Python package.
+- Released split manifests and scripts that materialize runnable benchmark data from upstream sources.
+
+SoftSkill is strongest in the single-round QA setting in the paper. Agentic execution is included as a harder boundary case: trajectory imitation can provide useful signal, but long-horizon procedural behavior is still more fragile than answer-behavior compression.
 
 ## Repository Contents
 
