@@ -1,4 +1,4 @@
-"""SkillOpt Optimizer -- skill update operations.
+"""SoftSkill/SkillOpt-compatible optimizer -- skill update operations.
 
 Analogous to the optimizer in neural network training: applies the computed
 "gradient" (patches) to the current skill document to produce an updated

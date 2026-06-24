@@ -1,7 +1,7 @@
-"""ReflACT: Reflective Agent Tuning.
+"""SoftSkill compatibility package.
 
-A general-purpose framework for iteratively optimizing LLM agent skills
-through structured reflection and self-improvement.
+The public project is SoftSkill, but the import package remains ``skillopt`` so
+existing configs, scripts, and SkillOpt-derived checkpoints continue to work.
 
 Pipeline stages:
   1. Rollout   — execute episodes with current skill

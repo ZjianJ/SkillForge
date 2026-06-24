@@ -1,9 +1,16 @@
 # Data Manifests
 
-This directory releases lightweight split manifests for the SkillOpt paper
-splits. These manifests are not full runnable benchmark payloads. To evaluate a
-benchmark, first materialize the full examples from the raw data source when
-needed, then point `--split_dir` at the split directory listed below.
+This directory releases lightweight split manifests used by the SoftSkill
+paper experiments. These manifests are not full runnable benchmark payloads. To
+evaluate a benchmark, first materialize the full examples from the raw data
+source when needed, then point `--split_dir` at the split directory listed
+below.
+
+The committed directories ending in `_id_split/` are lookup manifests. The
+materialization scripts in `scripts/data/` resolve those IDs against upstream
+datasets and write runnable split directories such as `data/searchqa_split`.
+`alfworld_path_split/` is the exception: it can be passed directly as
+`--split_dir` after the ALFWorld game files are downloaded separately.
 
 In this README, "coverage" describes which part of the upstream benchmark the
 manifest references. It does not mean the released manifest directory contains
@@ -50,7 +57,7 @@ to the data root containing `json_2.1.1`.
 The other manifest directories are lookup manifests. They intentionally omit
 full example fields such as questions, answers, contexts, images, or task
 instructions. Materialize those benchmarks into the `split_dir` paths listed
-above before running SkillOpt.
+above before running SoftSkill.
 
 ## Lookup Keys
 

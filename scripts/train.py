@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SkillOpt unified training entry point.
+"""SoftSkill unified training entry point.
 
 Usage
 -----
@@ -125,7 +125,7 @@ _BOOL = lambda x: x.lower() in ("true", "1", "yes")  # noqa: E731
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="SkillOpt: Executive Strategy for Self-Evolving Agent Skills",
+        description="SoftSkill training entry point",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -494,7 +494,7 @@ def load_config(args: argparse.Namespace) -> dict:
         env = flat.get("env", "unknown")
         model = flat.get("optimizer_model", "unknown").replace("/", "-")
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        flat["out_root"] = os.path.join("outputs", f"skillopt_{env}_{model}_{ts}")
+        flat["out_root"] = os.path.join("outputs", f"softskill_{env}_{model}_{ts}")
 
     flat["out_root"] = os.path.abspath(flat["out_root"])
     return flat
@@ -507,7 +507,7 @@ def main() -> None:
     cfg = load_config(args)
 
     print(f"\n{'='*60}")
-    print(f"  SkillOpt — Executive Strategy for Self-Evolving Agent Skills")
+    print(f"  SoftSkill — Soft-Prefix Skill Training")
     print(f"{'='*60}")
     print(f"  env:            {cfg.get('env')}")
     print(f"  optimizer_model:  {cfg.get('optimizer_model')}")

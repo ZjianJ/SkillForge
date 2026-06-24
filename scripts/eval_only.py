@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SkillOpt eval-only: run a single skill on a dataset without training.
+"""SoftSkill eval-only: run a single skill on a dataset without training.
 
 Usage
 -----
@@ -127,7 +127,7 @@ _BOOL = lambda x: str(x).lower() in ("true", "1", "yes")  # noqa: E731
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="SkillOpt eval-only")
+    p = argparse.ArgumentParser(description="SoftSkill eval-only")
     p.add_argument("--config", type=str, required=True)
     p.add_argument("--skill", type=str, required=True,
                    help="Path to skill .md file to evaluate")

@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--out_split_dir",
-        default="data/livemath_split",
+        default="data/livemathematicianbench_split",
         help="Where to write the materialized train/val/test split.",
     )
     parser.add_argument("--split_ratio", default="2:1:7", help="Deterministic train:val:test split ratio.")

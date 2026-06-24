@@ -1,4 +1,4 @@
-# SkillOpt default configuration — base for all environments.
+# SoftSkill default configuration — base for all environments.
 # Environment configs should inherit via: _base_: default.yaml
 
 model:

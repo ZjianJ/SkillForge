@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-# SkillOpt — SpreadsheetBench training launch script
+# SoftSkill — SpreadsheetBench hard-skill training launch script
 #
 # Usage:
 #   bash scripts/run_spreadsheetbench.sh --split_dir /path/to/split --data_root /path/to/data
@@ -17,10 +17,10 @@ OPTIMIZER_MODEL="${OPTIMIZER_MODEL:-gpt-5.5}"
 TARGET_MODEL="${TARGET_MODEL:-gpt-5.5}"
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-DEFAULT_OUT_ROOT="${PROJECT_ROOT}/outputs/skillopt_spreadsheetbench_${TARGET_MODEL}_${TIMESTAMP}"
+DEFAULT_OUT_ROOT="${PROJECT_ROOT}/outputs/softskill_spreadsheetbench_${TARGET_MODEL}_${TIMESTAMP}"
 
 echo "============================================================"
-echo "  SkillOpt — SpreadsheetBench Training"
+echo "  SoftSkill — SpreadsheetBench Training"
 echo "============================================================"
 echo "  Optimizer:  ${OPTIMIZER_MODEL}"
 echo "  Target:  ${TARGET_MODEL}"

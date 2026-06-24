@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-# SkillOpt — SearchQA training launch script
+# SoftSkill — SearchQA hard-skill training launch script
 #
 # Usage:
 #   bash scripts/run_searchqa.sh
@@ -18,10 +18,10 @@ OPTIMIZER_MODEL="${OPTIMIZER_MODEL:-gpt-5.5}"
 TARGET_MODEL="${TARGET_MODEL:-gpt-5.5}"
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-DEFAULT_OUT_ROOT="${PROJECT_ROOT}/outputs/skillopt_searchqa_${TARGET_MODEL}_${TIMESTAMP}"
+DEFAULT_OUT_ROOT="${PROJECT_ROOT}/outputs/softskill_searchqa_${TARGET_MODEL}_${TIMESTAMP}"
 
 echo "============================================================"
-echo "  SkillOpt — SearchQA Training"
+echo "  SoftSkill — SearchQA Training"
 echo "============================================================"
 echo "  Optimizer:  ${OPTIMIZER_MODEL}"
 echo "  Target:  ${TARGET_MODEL}"

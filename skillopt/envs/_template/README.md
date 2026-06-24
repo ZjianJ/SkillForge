@@ -1,6 +1,6 @@
 # Benchmark Template
 
-This directory provides scaffold files for adding a new benchmark to SkillOpt.
+This directory provides scaffold files for adding a new benchmark to SoftSkill.
 
 ## Files
 

@@ -1,5 +1,10 @@
 # Paper-aligned SkillOpt reference skills (GPT-5.5)
 
+These checkpoint skill markdown files are retained directly from the SkillOpt
+line of work for baseline evaluation and paper comparison. They are not renamed
+because existing configs and scripts refer to them as SkillOpt hard-skill
+artifacts.
+
 This folder provides a subset of the paper's main Table 1 GPT-5.5 optimized
 skills as reference artifacts — one `gpt5.5_skill.md` per currently included
 benchmark. You can plug them into `scripts/eval_only.py` to evaluate the

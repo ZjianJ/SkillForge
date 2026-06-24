@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Curated soft-prefix experiment runner for public examples.
-# This intentionally covers a small matrix; paper/internal sweeps belong in scripts/internal/.
+# This intentionally covers a small matrix; paper-scale sweeps are not part of
+# the public code release.
 set -euo pipefail
 
 TASKS="${TASKS:-searchqa livemathematicianbench docvqa}"

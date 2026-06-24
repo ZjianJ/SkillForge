@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-# SkillOpt — ALFWorld training launch script
+# SoftSkill — ALFWorld hard-skill training launch script
 #
 # Prerequisites:
 #   pip install -e ".[alfworld]"
@@ -36,10 +36,10 @@ OPTIMIZER_MODEL="${OPTIMIZER_MODEL:-gpt-5.5}"
 TARGET_MODEL="${TARGET_MODEL:-gpt-5.5}"
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-DEFAULT_OUT_ROOT="${PROJECT_ROOT}/outputs/skillopt_alfworld_${TARGET_MODEL}_${TIMESTAMP}"
+DEFAULT_OUT_ROOT="${PROJECT_ROOT}/outputs/softskill_alfworld_${TARGET_MODEL}_${TIMESTAMP}"
 
 echo "============================================================"
-echo "  SkillOpt — ALFWorld Training"
+echo "  SoftSkill — ALFWorld Training"
 echo "============================================================"
 echo "  Optimizer:       ${OPTIMIZER_MODEL}"
 echo "  Target:       ${TARGET_MODEL}"

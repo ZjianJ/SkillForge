@@ -1,23 +1,38 @@
-# SoftSkill
+# SoftSkill: Behavioral Compression for Contextual Adaptation
 
-SoftSkill is a research codebase for training **soft-prefix skills** for frozen open-weight language and vision-language models. It builds on the SkillOpt codebase and keeps the Python package name `skillopt` for compatibility, while adding soft-prefix and LoRA training, prompt-embedding vLLM serving, transfer utilities, and benchmark integrations.
+[![arXiv](https://img.shields.io/badge/arXiv-2606.20333-b31b1b.svg)](https://arxiv.org/abs/2606.20333)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](pyproject.toml)
 
-This repository is derived from Microsoft SkillOpt, released under the MIT License. The original hard-skill training loop is still available; the SoftSkill release focuses on the soft-prefix stack in `skillopt/softprefix/`.
+SoftSkill turns natural-language agent skills into compact, trainable **soft skills** for frozen open-weight language models. Instead of re-reading a long Markdown skill at inference time, a model can condition on a short learned prefix that captures task-specific behavior while keeping the backbone frozen.
 
-## What Is Included
+This repository contains the public training and evaluation stack used for the SoftSkill release: SoftSkill training, prompt-embedding serving, transfer utilities, benchmark integrations, and compatibility entry points under the `skillopt` Python package.
 
-- Core package: `skillopt/`
-- Soft-prefix and LoRA training: `skillopt/softprefix/`, `scripts/train_soft_prefix.py`
-- Supported configs: `configs/*/soft_prefix.yaml` and `configs/*/lora.yaml`
-- Public launch examples: `scripts/train/`
-- Research experiment helpers: `scripts/experiments/`
-- Analysis utilities: `scripts/analysis/`
-- Dataset split manifests and data setup notes: `data/README.md`
-- Tests: `tests/`
+## Repository Contents
 
-Generated rollouts, outputs, local corpora, checkpoints, private environment files, and the separate `soft-skill/` paper repo are intentionally excluded from the public code release.
+```text
+.
+|-- configs/                 # Benchmark configs for baseline, LoRA, and SoftSkill runs
+|-- data/
+|   |-- README.md            # Released split manifests, source revisions, lookup keys
+|   |-- *_id_split/          # Lightweight ID manifests for public benchmarks
+|   `-- alfworld_path_split/  # ALFWorld path manifest
+|-- scripts/
+|   |-- data/                # Scripts that materialize runnable benchmark splits
+|   |-- train/               # Public launch scripts for training and evaluation
+|   |-- experiments/         # Research experiment launchers
+|   `-- analysis/            # SoftSkill analysis utilities
+|-- skillopt/                # Compatibility package and core training/evaluation code
+|-- tests/                   # Unit and integration tests
+|-- ckpt/                    # Checkpoint and skill notes; large artifacts excluded
+`-- docs/                    # Additional project documentation
+```
+
+Generated rollouts, outputs, local corpora, model checkpoints, private environment files, and the separate `soft-skill/` paper repo are intentionally excluded from the public code release.
 
 ## Install
+
+Install the package in editable mode from a fresh checkout:
 
 ```bash
 git clone https://github.com/xijia-tao/SoftSkill.git
@@ -25,19 +40,45 @@ cd SoftSkill
 pip install -e .
 ```
 
-For soft-prefix training and local serving:
+For SoftSkill training with Qwen models and local serving support, install the optional extras:
 
 ```bash
 pip install -e ".[softprefix,qwen]"
 ```
 
-For development:
+For development and tests, include the development dependencies as well:
 
 ```bash
 pip install -e ".[dev,softprefix]"
 ```
 
-## Configure Credentials
+## Optional: Prompt-Embeds Serving
+
+For larger evaluation runs, you can serve prompt embeddings through vLLM and point training or evaluation at that endpoint. This is optional for the default local-HF training command; use it when you set `INFERENCE_BACKEND=vllm_prompt_embeds`.
+
+```bash
+MODEL_NAME=Qwen/Qwen3.5-4B GPU_IDS=0 PORT=8010 bash scripts/train/start_server.sh
+```
+
+The server exposes an OpenAI-compatible endpoint at `http://127.0.0.1:8010/v1`.
+
+To use that server with the shell launcher, pass its base URL explicitly:
+
+```bash
+INFERENCE_BACKEND=vllm_prompt_embeds \
+INFERENCE_BASE_URL=http://127.0.0.1:8010 \
+CONFIG=configs/searchqa/soft_prefix.yaml \
+SPLIT_DIR=data/searchqa_split \
+MODEL_NAME=Qwen/Qwen3.5-4B \
+OUTPUT_DIR=outputs/SoftSkill_searchqa_example \
+bash scripts/train/train_soft_prefix.sh
+```
+
+## Optional Credentials
+
+The local SoftSkill training example below does **not** require OpenAI, Azure OpenAI, Anthropic, or MiniMax credentials. By default, `scripts/train/train_soft_prefix.sh` overrides the SearchQA config to use `INFERENCE_BACKEND=local_hf`, so training and evaluation run through the local Hugging Face model.
+
+Configure credentials only when you use API-backed chat models, hard-skill reference evaluation, or trajectory rollouts that call an external backend:
 
 ```bash
 cp .env.example .env
@@ -46,51 +87,104 @@ source .env
 set +a
 ```
 
-Only configure the backends you use. The OpenAI-compatible mode reuses `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, and `AZURE_OPENAI_AUTH_MODE=openai_compatible`.
+Fill in only the backend variables you need. OpenAI-compatible endpoints reuse `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, and `AZURE_OPENAI_AUTH_MODE=openai_compatible`.
 
-## Start A Prompt-Embeds Server
+## Prepare Benchmark Data
+
+This repository includes lightweight split manifests under `data/*_id_split/` and `data/alfworld_path_split/`, but most benchmarks require materializing full examples from their original data sources before training or evaluation. Install the data helpers used by the preparation scripts:
+
+The committed `*_id_split/` directories are lookup manifests; the `prepare_*` scripts resolve those IDs against upstream datasets and write the runnable `split_dir` directories used by training and evaluation.
 
 ```bash
-MODEL_NAME=Qwen/Qwen3.5-4B GPU_IDS=0 PORT=8010 bash scripts/train/start_server.sh
+pip install datasets huggingface_hub pillow
 ```
 
-The server exposes an OpenAI-compatible endpoint at `http://127.0.0.1:8010/v1`.
-
-## Train A Soft Prefix
+Prepare the text and math QA benchmarks:
 
 ```bash
-CONFIG=configs/searchqa/soft_prefix.yaml SPLIT_DIR=data/searchqa_split MODEL_NAME=Qwen/Qwen3.5-4B OUTPUT_DIR=outputs/SoftSkill_searchqa_example bash scripts/train/train_soft_prefix.sh
+python scripts/data/prepare_searchqa.py
+python scripts/data/prepare_livemath.py
+```
+
+Prepare the remaining benchmark payloads used by the released configs:
+
+```bash
+python scripts/data/prepare_docvqa.py
+python scripts/data/prepare_officeqa.py
+python scripts/data/prepare_spreadsheetbench.py
+```
+
+`prepare_docvqa.py` writes `data/docvqa/splits` and saves images to `data/docvqa_images`. `prepare_officeqa.py` requires authorized Hugging Face access to the gated `databricks/officeqa` dataset; it writes `data/officeqa_split` and referenced Treasury Bulletin files under `data/officeqa_docs_official`. `prepare_spreadsheetbench.py` downloads and extracts SpreadsheetBench Verified 400 into `data/spreadsheetbench_verified_400` and writes `data/spreadsheetbench_split`.
+
+ALFWorld is different: the released split is already a path manifest at `data/alfworld_path_split`, but the game files must be downloaded separately. Install the ALFWorld extra, download the games, set `ALFWORLD_DATA`, then validate that the manifest resolves:
+
+```bash
+pip install -e ".[alfworld]"
+alfworld-download
+export ALFWORLD_DATA=/path/to/alfworld/data
+python scripts/data/prepare_alfworld.py --data_root "$ALFWORLD_DATA"
+```
+
+See `data/README.md` for split counts, source revisions, and the lookup keys used by each manifest.
+
+## Train a SoftSkill
+
+The SearchQA example trains a length-32 soft skill for `Qwen/Qwen3.5-4B` using the materialized split directory in `data/searchqa_split`. The backbone stays frozen; the output directory receives the learned skill checkpoints and training artifacts.
+
+```bash
+CONFIG=configs/searchqa/soft_prefix.yaml \
+SPLIT_DIR=data/searchqa_split \
+MODEL_NAME=Qwen/Qwen3.5-4B \
+OUTPUT_DIR=outputs/SoftSkill_searchqa_example \
+bash scripts/train/train_soft_prefix.sh
 ```
 
 You can also call the Python entry point directly:
 
 ```bash
-python scripts/train_soft_prefix.py   --config configs/searchqa/soft_prefix.yaml   --split_dir data/searchqa_split   --model_name Qwen/Qwen3.5-4B   --out_root outputs/SoftSkill_searchqa_example
+python scripts/train_soft_prefix.py \
+  --config configs/searchqa/soft_prefix.yaml \
+  --split_dir data/searchqa_split \
+  --model_name Qwen/Qwen3.5-4B \
+  --out_root outputs/SoftSkill_searchqa_example
 ```
 
-## Evaluate A Soft Prefix
+## Evaluate a SoftSkill
+
+After training, evaluate the best checkpoint on the configured validation split:
 
 ```bash
-CHECKPOINT_PATH=outputs/SoftSkill_searchqa_example/best_prefix.pt OUTPUT_DIR=outputs/SoftSkill_searchqa_eval bash scripts/train/eval_soft_prefix.sh
+CHECKPOINT_PATH=outputs/SoftSkill_searchqa_example/best_prefix.pt \
+OUTPUT_DIR=outputs/SoftSkill_searchqa_eval \
+bash scripts/train/eval_soft_prefix.sh
 ```
 
-Hard-skill SkillOpt evaluation remains available through:
+Hard-skill reference evaluation remains available through:
 
 ```bash
-python scripts/eval_only.py   --config configs/searchqa/default.yaml   --skill ckpt/searchqa/gpt5.5_skill.md   --split valid_unseen   --split_dir data/searchqa_split
+python scripts/eval_only.py \
+  --config configs/searchqa/default.yaml \
+  --skill ckpt/searchqa/gpt5.5_skill.md \
+  --split valid_unseen \
+  --split_dir data/searchqa_split
 ```
 
-## Repository Hygiene
+## License and Attribution
 
-Before publishing or opening a PR, check that generated artifacts are not staged:
+This project is released under the MIT License. It is derived from Microsoft [SkillOpt](https://github.com/microsoft/SkillOpt/), whose copyright notice is preserved in `LICENSE`.
 
-```bash
-git status --short
-python -m pytest tests/test_softprefix_data.py tests/test_softprefix_vllm_inference.py -q
+## Citation
+
+If you find SoftSkill useful, please cite:
+
+```bibtex
+@misc{tao2026softskillbehavioralcompressioncontextual,
+      title={SoftSkill: Behavioral Compression for Contextual Adaptation},
+      author={Xijia Tao and Yihua Teng and Xinyu Fu and Ziru Liu and Kecheng Chen and Yuzhi Zhao and Suiyun Zhang and Rui Liu and Lingpeng Kong},
+      year={2026},
+      eprint={2606.20333},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2606.20333},
+}
 ```
-
-See `docs/release.md` for the release boundary and `docs/guide/softskill.md` for the soft-prefix workflow.
-
-## License And Attribution
-
-This project is released under the MIT License. It is derived from Microsoft SkillOpt, whose copyright notice is preserved in `LICENSE`.
