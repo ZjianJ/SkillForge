@@ -32,7 +32,8 @@ SoftSkill keeps the backbone model frozen. It initializes a prefix from a readab
 - 裸 Qwen 在相同 test280 协议下为97/280（34.64%）；Combined 与裸模型差异不显著，
   因此当前结果不能证明 soft prompt 优于裸模型。
 - PRCB v1--v6 没有稳定超过 Combined。task-specific oracle 将 core 从5%扩大到10%后，
-  同题自由生成由28/61提高到35/61；20%实验仍在运行。
+  同题自由生成由28/61提高到35/61；继续扩大到20%回落到33/61，当前结果呈现10%的
+  中间覆盖率最优，而不是覆盖率越高越好。
 
 这些结果混合了开发集、正式测试集和同题 oracle，不能直接合并排名。审计后的完整表格与
 口径说明见 [实验结果总览](docs/experiment_results_overview.md)。

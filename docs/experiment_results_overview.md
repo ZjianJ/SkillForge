@@ -183,7 +183,7 @@ Combined 定义为正 target-token gain 与完整词表 JS 差异的乘积。
 | Task-specific Combined 5%，旧 shared-preserve | 26/61（42.62%） | 63.49% | 完成 |
 | Task-specific Combined 5%，覆盖率消融共同 preserve | **28/61（45.90%）** | 62.18% | 完成 |
 | Task-specific Combined 10%，共同 preserve | **35/61（57.38%）** | 56.86% | 完成 |
-| Task-specific Combined 20%，共同 preserve | -- | -- | 训练中，尚未自由生成 |
+| Task-specific Combined 20%，共同 preserve | **33/61（54.10%）** | 50.74% | 完成 |
 
 旧 5% 实验中所有61题的 core KL 都改善，但自由生成只成功26题；closure 与成功的
 Spearman 相关约为0.194且不显著。逐题诊断显示35个 Soft 失败中，13个是执行失败，
@@ -191,7 +191,9 @@ Spearman 相关约为0.194且不显著。逐题诊断显示35个 Soft 失败中�
 扩大到10%后成功数增至35题：相对5%新增11题、丢失4题，净增7题（+11.48pp），
 配对精确检验 `p=0.1185`。执行失败从15题降至8题，而可执行但语义错误保持18题。
 这为“5%覆盖偏小、额外core主要补足代码结构稳定性”提供了明确的方向性证据，但
-单种子61题尚未达到统计显著，仍需等待20%判断收益是否继续增长或开始稀释。
+单种子61题尚未达到统计显著。继续扩大到20%后成功数回落到33题：相对10%新增5题、
+丢失7题，净减2题，配对精确检验 `p=0.7744`。执行失败仅由8降至7，可执行但语义错误
+则由18增至21；覆盖更多 token 的结构收益已趋于饱和，并开始出现语义目标稀释。
 
 覆盖率消融三组的唯一处理变量是 Combined core 比例：
 
@@ -201,8 +203,8 @@ Spearman 相关约为0.194且不显著。逐题诊断显示35个 Soft 失败中�
 | 10% | 5,522 | 2,777 | 99.73% |
 | 20% | 11,007 | 2,777 | 99.997% |
 
-10%结果已经支持5%偏小；只有20%完成后，才能判断覆盖收益是否单调以及10%是否为
-更合适的折中点。
+三档结果表明覆盖收益不是单调的：5%到10%提高7题，10%到20%反而减少2题。10%是
+本次固定 seed、固定训练预算下的观察最优折中点，但仍需要多种子复验才能确认为稳定结论。
 
 ## 9. 当前可靠结论
 
@@ -219,8 +221,9 @@ Spearman 相关约为0.194且不显著。逐题诊断显示35个 Soft 失败中�
    不能可靠保持。
 7. **task-specific 10%已超过其5%版本和同题完整文本 Skill的聚合成功数。** 结果为
    35/61，对5%的28/61净增7题；但这是同题oracle、单种子结果，不能作为泛化优势。
-8. **覆盖率确实是当前瓶颈之一，但最优点仍未知。** 10%的主要收益表现为执行失败
-   减少近一半；20%仍在训练，尚不能判断进一步扩大是否会发生梯度稀释。
+8. **覆盖率是当前瓶颈之一，但扩大并非单调有效。** 10%的主要收益表现为执行失败
+   减少近一半；20%回落到33/61且语义错误增加，显示更大覆盖开始产生梯度稀释或
+   相互冲突的局部教师目标。
 
 ## 10. 审计性与未完成产物
 
@@ -233,7 +236,7 @@ Spearman 相关约为0.194且不显著。逐题诊断显示35个 Soft 失败中�
   不满足接收条件。
 - `SpreadsheetBench_prcb_v6_diagnostic_overlapping_core_history`：验证阶段 core
   高重叠和 history 机制，不作为最终效果行。
-- 最新覆盖率循环正在运行；现有5%结果完整，10%/20%状态以第8节快照为准。
+- 覆盖率5%/10%/20%三组均已完成；状态与逐题比较以第8节为准。
 
 ## 11. 主要结果文件
 
@@ -247,3 +250,5 @@ Spearman 相关约为0.194且不显著。逐题诊断显示35个 Soft 失败中�
 - PRCB-v6 ensemble：`outputs/SpreadsheetBench_prcb_v6_functional_len8_seed1/eval/ensemble/valid_seen/ensemble_eval_summary.json`
 - Task-specific：`outputs/SpreadsheetBench_task_specific_selective_skillkl_len8_seed1/summary.json`
 - 覆盖率5%：`outputs/SpreadsheetBench_task_specific_combined_core05_len8_seed1_coverage_ablation/summary.json`
+- 覆盖率10%：`outputs/SpreadsheetBench_task_specific_combined_core10_len8_seed1_coverage_ablation/summary.json`
+- 覆盖率20%：`outputs/SpreadsheetBench_task_specific_combined_core20_len8_seed1_coverage_ablation/summary.json`
