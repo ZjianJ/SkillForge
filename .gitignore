@@ -47,6 +47,23 @@ configs/**/*.local.yaml
 .codex_azure*/
 .venv
 
+# Large local model/checkpoint artifacts. Publish selected checkpoints through
+# Git LFS or a GitHub Release instead of ordinary Git history.
+model_cache/
+.cache/
+wandb/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.npz
+
+# Private key material and local spreadsheet payloads.
+*.pem
+*.key
+data/**/*.xlsx
+data/**/*.xlsm
+
 # Internal docs and paper/reproduction notes not intended for code release.
 docs/ablation_plan.md
 docs/ablation_paper_tables.md

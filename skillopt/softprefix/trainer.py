@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import ast
+import gc
 import hashlib
 import json
 import math
 import os
 import random
 import re
+import shutil
+import tempfile
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -130,12 +133,14 @@ class SoftPrefixSettings:
     trajectory_max_new_tokens: int = 0
     torch_dtype: str = "auto"
     device: str = "auto"
+    gradient_checkpointing: bool = False
     trust_remote_code: bool = False
     init_text_path: str = ""
     init_strategy: str = "text"
     generation_temperature: float = 0.0
     training_data: str = "gold"
     trajectory_rollout_dir: str = ""
+    trajectory_examples_path: str = ""
     trajectory_rollout_backend: str = "openai"
     trajectory_min_hard: float = 1.0
     trajectory_min_soft: float = 0.0
@@ -155,6 +160,12 @@ class SoftPrefixSettings:
     inference_base_url: str = "http://127.0.0.1:8010"
     inference_timeout_seconds: float = 300.0
     injection_position: str = "prompt_start"
+    selective_label_field: str = ""
+    always_supervise_eos: bool = True
+    require_clean_trajectory_prompt: bool = False
+    token_weighted_accumulation: bool = False
+    preservation_loss_weight: float = 0.0
+    preservation_label_field: str = "preserve_indices"
 
     @classmethod
     def from_dict(cls, cfg: dict[str, Any]) -> "SoftPrefixSettings":
@@ -172,12 +183,14 @@ class SoftPrefixSettings:
             trajectory_max_new_tokens=int(cfg.get("trajectory_max_new_tokens", 0) or 0),
             torch_dtype=str(cfg.get("torch_dtype", "auto")),
             device=str(cfg.get("device", "auto")),
+            gradient_checkpointing=bool(cfg.get("gradient_checkpointing", False)),
             trust_remote_code=bool(cfg.get("trust_remote_code", False)),
             init_text_path=str(cfg.get("init_text_path", "")),
             init_strategy=str(cfg.get("init_strategy", "text")),
             generation_temperature=float(cfg.get("generation_temperature", 0.0)),
             training_data=str(cfg.get("training_data", "gold")),
             trajectory_rollout_dir=str(cfg.get("trajectory_rollout_dir", "")),
+            trajectory_examples_path=str(cfg.get("trajectory_examples_path", "")),
             trajectory_rollout_backend=_normalize_trajectory_rollout_backend(
                 cfg.get("trajectory_rollout_backend", "openai")
             ),
@@ -203,6 +216,18 @@ class SoftPrefixSettings:
             injection_position=normalize_prefix_injection_position(
                 cfg.get("injection_position", "prompt_start")
             ),
+            selective_label_field=str(cfg.get("selective_label_field", "") or "").strip(),
+            always_supervise_eos=_parse_bool(cfg.get("always_supervise_eos", True)),
+            require_clean_trajectory_prompt=_parse_bool(
+                cfg.get("require_clean_trajectory_prompt", False)
+            ),
+            token_weighted_accumulation=_parse_bool(
+                cfg.get("token_weighted_accumulation", False)
+            ),
+            preservation_loss_weight=float(cfg.get("preservation_loss_weight", 0.0)),
+            preservation_label_field=str(
+                cfg.get("preservation_label_field", "preserve_indices") or ""
+            ).strip(),
         )
 
 
@@ -400,6 +425,34 @@ def _batch_to_tensors(torch, batch: dict, device) -> dict:
     }
 
 
+def _normalized_adapter_accumulation_loss(
+    outputs: Any,
+    *,
+    selected_tokens: int,
+    group_selected_tokens: int,
+    preservation_tokens: int,
+    group_preservation_tokens: int,
+    preservation_weight: float,
+):
+    """Scale CE and preservation KL by their own token totals in one accumulation group."""
+    if selected_tokens <= 0 or group_selected_tokens <= 0:
+        raise ValueError("Adapter accumulation requires selected tokens")
+    selected_loss = getattr(outputs, "selected_loss", outputs.loss)
+    loss = selected_loss * (selected_tokens / group_selected_tokens)
+    if preservation_tokens > 0:
+        if group_preservation_tokens <= 0:
+            raise ValueError("Preservation tokens require a positive group total")
+        preservation_loss = getattr(outputs, "preservation_loss", None)
+        if preservation_loss is None:
+            raise ValueError("Model output lacks preservation_loss")
+        loss = loss + (
+            float(preservation_weight)
+            * preservation_loss
+            * (preservation_tokens / group_preservation_tokens)
+        )
+    return loss
+
+
 def _items_for_eval(dataloader: Any, split: str, env_num: int, seed: int) -> list[dict]:
     batch = dataloader.build_eval_batch(env_num=env_num, split=split, seed=seed)
     return list(batch.payload or [])
@@ -428,6 +481,40 @@ def _strip_think_blocks(text: str) -> str:
 def _load_json_file(path: str) -> Any:
     with open(path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _load_trajectory_examples_jsonl(
+    path: str,
+    *,
+    require_clean_prompt: bool = False,
+) -> list[dict[str, Any]]:
+    abs_path = os.path.abspath(os.path.expanduser(path))
+    if not os.path.exists(abs_path):
+        raise FileNotFoundError(f"soft_prefix.trajectory_examples_path not found: {abs_path}")
+    examples: list[dict[str, Any]] = []
+    with open(abs_path, encoding="utf-8") as handle:
+        for line_no, line in enumerate(handle, 1):
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict) or "messages" not in row or "target" not in row:
+                raise ValueError(
+                    f"{abs_path}:{line_no}: each trajectory requires messages and target"
+                )
+            if require_clean_prompt:
+                system_messages = [
+                    str(message.get("content", ""))
+                    for message in row.get("messages", [])
+                    if message.get("role") == "system"
+                ]
+                if any(re.search(r"(?m)^\s*##\s+Skill\s*$", text) for text in system_messages):
+                    raise ValueError(
+                        f"{abs_path}:{line_no}: clean trajectory unexpectedly contains a Skill section"
+                    )
+            examples.append(row)
+    if not examples:
+        raise ValueError(f"No trajectory examples found in {abs_path}")
+    return examples
 
 
 def _read_text_if_exists(path: str) -> str:
@@ -1405,6 +1492,25 @@ def _generate_spreadsheet_response_with_repair(
     return response, conversation
 
 
+def _run_spreadsheet_generated_code_on_copy(
+    code: str,
+    input_path: str,
+    pred_path: str,
+    *,
+    timeout: int,
+) -> tuple[bool, str]:
+    """Execute a spreadsheet prediction without exposing the canonical input."""
+    with tempfile.TemporaryDirectory(prefix="softskill_spreadsheet_input_") as case_dir:
+        safe_input_path = os.path.join(case_dir, os.path.basename(input_path))
+        shutil.copy2(input_path, safe_input_path)
+        return run_spreadsheet_generated_code(
+            code,
+            safe_input_path,
+            pred_path,
+            timeout=timeout,
+        )
+
+
 def evaluate_spreadsheet_prefix(
     prefix_model: SoftPrefixCausalLM,
     items: list[dict],
@@ -1419,6 +1525,7 @@ def evaluate_spreadsheet_prefix(
     generator: Any | None = None,
     injection_position: str = "prompt_start",
     repair_turns: int = 1,
+    generation_batch_size: int = 1,
 ) -> tuple[float, float, list[dict]]:
     """Generate SpreadsheetBench Python solutions with the prefix model and score workbooks."""
     injection_position = normalize_prefix_injection_position(injection_position)
@@ -1507,6 +1614,7 @@ def evaluate_spreadsheet_prefix(
             temperature,
             prefix_insert_indices=[record["prefix_insert_idx"] for record in prompt_records],
             desc=desc,
+            local_batch_size=generation_batch_size,
         )
 
     response_iter = zip(prompt_records, responses) if not use_repair else ((record, "") for record in prompt_records)
@@ -1553,7 +1661,17 @@ def evaluate_spreadsheet_prefix(
         enrichment_parts: list[str] = []
         for no, input_path, gold_path in record["cases"]:
             pred_path = os.path.join(pred_dir, f"{no}_pred.xlsx")
-            ok_exec, err = run_spreadsheet_generated_code(code, input_path, pred_path, timeout=exec_timeout)
+            # Generated agent code is untrusted with respect to the benchmark
+            # assets.  In particular, a plausible workbook-manipulation
+            # solution may rename or delete INPUT_PATH.  Never expose the
+            # canonical validation workbook as that path: one destructive
+            # prediction would otherwise contaminate all later checkpoints.
+            ok_exec, err = _run_spreadsheet_generated_code_on_copy(
+                code,
+                input_path,
+                pred_path,
+                timeout=exec_timeout,
+            )
             if not ok_exec:
                 result["cases"].append({"no": no, "stage": "exec", "ok": False, "error": err[:500]})
                 if not result["fail_reason"]:
@@ -2573,7 +2691,7 @@ def _build_prefix_model(env: str, settings: SoftPrefixSettings, init_text: str) 
             "soft_prefix.architecture must be one of auto, causal_lm, or vision_lm"
         )
     model_cls = SoftPrefixVisionLM if use_vision_model else SoftPrefixCausalLM
-    return model_cls(
+    prefix_model = model_cls(
         settings.model_name,
         prefix_length=settings.prefix_length,
         init_text=init_text,
@@ -2582,6 +2700,16 @@ def _build_prefix_model(env: str, settings: SoftPrefixSettings, init_text: str) 
         device=settings.device,
         trust_remote_code=settings.trust_remote_code,
     )
+    if settings.gradient_checkpointing:
+        prefix_model.model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
+        prefix_model.model.config.use_cache = False
+        # Transformers applies layer checkpointing only in training mode. The
+        # base model remains frozen; for Qwen3.5/3.6 dropout is zero, so this
+        # switch only activates recomputation of intermediate activations.
+        prefix_model.model.train()
+    return prefix_model
 
 
 def _build_lora_model(env: str, settings: LoraSettings) -> LoraCausalLM | LoraVisionLM:
@@ -2676,6 +2804,10 @@ def _build_dataset(
             max_prompt_tokens=settings.max_prompt_tokens,
             max_target_tokens=settings.max_target_tokens,
             injection_position=settings.injection_position,
+            selective_label_field=settings.selective_label_field,
+            always_supervise_eos=settings.always_supervise_eos,
+            preservation_loss_weight=settings.preservation_loss_weight,
+            preservation_label_field=settings.preservation_label_field,
         )
     raise ValueError(f"Unsupported soft-prefix env: {env!r}")
 
@@ -2725,6 +2857,7 @@ def _generate_prompt_responses(
     temperature: float,
     prefix_insert_indices: list[int | None] | None = None,
     desc: str = "Eval",
+    local_batch_size: int = 1,
 ) -> list[str]:
     has_insert_indices = bool(prefix_insert_indices) and any(
         idx is not None for idx in prefix_insert_indices
@@ -2741,6 +2874,26 @@ def _generate_prompt_responses(
     indices = prefix_insert_indices or [None] * len(prompts)
     responses: list[str] = []
     progress_desc = f"{desc} Generate" if desc else "Generate"
+    local_batch_size = max(1, int(local_batch_size))
+    if local_batch_size > 1:
+        progress = tqdm(total=len(prompts), desc=progress_desc, unit="ex", leave=False)
+        try:
+            for start in range(0, len(prompts), local_batch_size):
+                batch_prompts = prompts[start:start + local_batch_size]
+                batch_indices = indices[start:start + local_batch_size]
+                responses.extend(
+                    prefix_model.generate_from_prompts(
+                        batch_prompts,
+                        max_prompt_tokens=max_prompt_tokens,
+                        max_new_tokens=max_new_tokens,
+                        temperature=temperature,
+                        prefix_insert_indices=batch_indices,
+                    )
+                )
+                progress.update(len(batch_prompts))
+        finally:
+            progress.close()
+        return responses
     for prompt, insert_idx in zip(tqdm(prompts, desc=progress_desc, unit="ex", leave=False), indices):
         responses.append(
             prefix_model.generate_from_prompt(
@@ -2770,7 +2923,7 @@ def _build_vllm_eval_generator(prefix_model: Any, settings: SoftPrefixSettings, 
     return generator
 
 
-def _evaluate_prefix(
+def _evaluate_prefix_impl(
     env: str,
     prefix_model: Any,
     items: list[dict],
@@ -2866,8 +3019,47 @@ def _evaluate_prefix(
             generator=generator,
             injection_position=settings.injection_position,
             repair_turns=int(cfg.get("max_turns", cfg.get("max_tool_turns", 1)) or 1),
+            generation_batch_size=int(cfg.get("generation_batch_size", 1) or 1),
         )
     raise ValueError(f"Unsupported soft-prefix env: {env!r}")
+
+
+def _evaluate_prefix(
+    env: str,
+    prefix_model: Any,
+    items: list[dict],
+    *,
+    cfg: dict[str, Any],
+    settings: SoftPrefixSettings,
+    out_dir: str,
+    desc: str,
+    vllm_plain: bool = False,
+) -> tuple[float, float, list[dict]]:
+    """Evaluate with KV caching even when training uses gradient checkpointing."""
+    base_model = getattr(prefix_model, "model", None)
+    restore_training = bool(getattr(base_model, "training", False)) if base_model is not None else False
+    model_config = getattr(base_model, "config", None)
+    restore_use_cache = getattr(model_config, "use_cache", None)
+    if settings.gradient_checkpointing and base_model is not None:
+        base_model.eval()
+        if model_config is not None:
+            model_config.use_cache = True
+    try:
+        return _evaluate_prefix_impl(
+            env,
+            prefix_model,
+            items,
+            cfg=cfg,
+            settings=settings,
+            out_dir=out_dir,
+            desc=desc,
+            vllm_plain=vllm_plain,
+        )
+    finally:
+        if model_config is not None and restore_use_cache is not None:
+            model_config.use_cache = restore_use_cache
+        if base_model is not None:
+            base_model.train(restore_training)
 
 
 def _evaluate_plain_baseline(
@@ -3036,7 +3228,7 @@ def _train_adapter(
             raise FileNotFoundError(f"soft_prefix.checkpoint_path not found: {checkpoint_path}")
         load_checkpoint(torch, adapter_model, checkpoint_path)
         summary[best_summary_key] = checkpoint_path
-        if sel_items:
+        if sel_items and bool(cfg.get("checkpoint_eval_val", True)):
             checkpoint_val_dir = os.path.join(out_root, "eval", "checkpoint", "valid_seen")
             checkpoint_val_hard, checkpoint_val_soft, _ = _evaluate_prefix(
                 env,
@@ -3083,7 +3275,24 @@ def _train_adapter(
 
     training_data = settings.training_data.strip().lower()
     if training_data in {"trajectory", "trajectory_sft"}:
-        if env == "alfworld":
+        if getattr(settings, "trajectory_examples_path", "").strip():
+            train_items = _load_trajectory_examples_jsonl(
+                settings.trajectory_examples_path,
+                require_clean_prompt=bool(
+                    getattr(settings, "require_clean_trajectory_prompt", False)
+                ),
+            )
+            meta_path = os.path.join(out_root, "trajectory_sft", "examples.jsonl")
+            os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+            with open(meta_path, "w", encoding="utf-8") as handle:
+                for example in train_items:
+                    handle.write(json.dumps(example, ensure_ascii=False) + "\n")
+            print(
+                f"  [trajectory_sft] loaded {len(train_items)} cached examples from "
+                f"{os.path.abspath(settings.trajectory_examples_path)}",
+                flush=True,
+            )
+        elif env == "alfworld":
             train_items = _collect_alfworld_trajectory_examples(
                 items=train_items,
                 cfg=cfg,
@@ -3138,20 +3347,92 @@ def _train_adapter(
     epoch_bar = tqdm(range(1, num_epochs + 1), desc="Epochs", unit="epoch")
     for epoch in epoch_bar:
         t0 = time.time()
-        losses: list[float] = []
+        selected_loss_token_sum = 0.0
+        preservation_loss_token_sum = 0.0
+        supervised_tokens_seen = 0
+        preservation_tokens_seen = 0
         optimizer.zero_grad(set_to_none=True)
-        step_bar = tqdm(enumerate(train_loader, start=1), total=len(train_loader), desc=f"  Train {epoch}/{num_epochs}", unit="batch", leave=False)
-        for step, batch in step_bar:
-            tensor_batch = _batch_to_tensors(torch, batch, adapter_model.device)
-            outputs = adapter_model.forward(tensor_batch)
-            loss = outputs.loss / accumulation
-            loss.backward()
-            if step % accumulation == 0 or step == len(train_loader):
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-            cur_loss = float(outputs.loss.detach().cpu())
-            losses.append(cur_loss)
-            step_bar.set_postfix(loss=f"{cur_loss:.4f}")
+        step_bar = tqdm(total=len(train_loader), desc=f"  Train {epoch}/{num_epochs}", unit="batch", leave=False)
+        batch_iterator = iter(train_loader)
+        processed_batches = 0
+        while processed_batches < len(train_loader):
+            raw_group = []
+            for _ in range(accumulation):
+                try:
+                    raw_group.append(next(batch_iterator))
+                except StopIteration:
+                    break
+            tensor_group = [
+                _batch_to_tensors(torch, batch, adapter_model.device)
+                for batch in raw_group
+            ]
+            selected_counts = [
+                int((batch["labels"] != -100).sum().item())
+                for batch in tensor_group
+            ]
+            preservation_counts = [
+                int(batch.get("preservation_mask", torch.zeros((), device=adapter_model.device)).sum().item())
+                for batch in tensor_group
+            ]
+            if any(count <= 0 for count in selected_counts):
+                raise ValueError("Training batch has no supervised target tokens")
+            group_selected_tokens = sum(selected_counts)
+            group_preservation_tokens = sum(preservation_counts)
+            optimizer.zero_grad(set_to_none=True)
+
+            for tensor_batch, supervised_tokens, preservation_tokens in zip(
+                tensor_group,
+                selected_counts,
+                preservation_counts,
+                strict=True,
+            ):
+                tensor_batch["preservation_loss_weight"] = settings.preservation_loss_weight
+                outputs = adapter_model.forward(tensor_batch)
+                selected_value = float(getattr(outputs, "selected_loss", outputs.loss).detach().cpu())
+                preservation_value = float(
+                    getattr(outputs, "preservation_loss", outputs.loss.detach() * 0.0).detach().cpu()
+                )
+                supervised_tokens_seen += supervised_tokens
+                preservation_tokens_seen += preservation_tokens
+                selected_loss_token_sum += selected_value * supervised_tokens
+                preservation_loss_token_sum += preservation_value * preservation_tokens
+
+                if bool(getattr(settings, "token_weighted_accumulation", False)):
+                    loss = _normalized_adapter_accumulation_loss(
+                        outputs,
+                        selected_tokens=supervised_tokens,
+                        group_selected_tokens=group_selected_tokens,
+                        preservation_tokens=preservation_tokens,
+                        group_preservation_tokens=group_preservation_tokens,
+                        preservation_weight=settings.preservation_loss_weight,
+                    )
+                else:
+                    loss = outputs.loss / len(tensor_group)
+                loss.backward()
+                cur_loss = selected_value + settings.preservation_loss_weight * preservation_value
+                step_bar.set_postfix(
+                    loss=f"{cur_loss:.4f}",
+                    preserve=f"{preservation_value:.4f}",
+                )
+                step_bar.update(1)
+                processed_batches += 1
+                # Drop the graph before the next long-context forward.
+                del loss, outputs, tensor_batch
+                cuda_mod = getattr(torch, "cuda", None)
+                if cuda_mod is not None and cuda_mod.is_available():
+                    gc.collect()
+                    cuda_mod.empty_cache()
+
+            optimizer.step()
+        step_bar.close()
+
+        selected_epoch_loss = selected_loss_token_sum / max(supervised_tokens_seen, 1)
+        preservation_epoch_loss = (
+            preservation_loss_token_sum / max(preservation_tokens_seen, 1)
+            if preservation_tokens_seen > 0
+            else 0.0
+        )
+        epoch_loss = selected_epoch_loss + settings.preservation_loss_weight * preservation_epoch_loss
 
         val_dir = os.path.join(out_root, "eval", f"epoch_{epoch:02d}", "valid_seen")
         val_hard, val_soft, _ = _evaluate_prefix(
@@ -3173,13 +3454,23 @@ def _train_adapter(
             load_checkpoint(torch, adapter_model, best_path)
         rec = {
             "epoch": epoch,
-            "loss": sum(losses) / max(len(losses), 1),
+            "loss": epoch_loss,
+            "selected_ce_loss": selected_epoch_loss,
+            "preservation_kl_loss": preservation_epoch_loss,
             "valid_seen_hard": val_hard,
             "valid_seen_soft": val_soft,
             "gate_metric": gate_metric,
             "valid_seen_score": val_score,
             "action": action,
             "wall_time_s": round(time.time() - t0, 1),
+            "supervised_tokens": supervised_tokens_seen,
+            "preservation_tokens": preservation_tokens_seen,
+            "mean_supervised_tokens_per_example": supervised_tokens_seen / max(len(dataset), 1),
+            "token_weighted_accumulation": bool(
+                getattr(settings, "token_weighted_accumulation", False)
+            ),
+            "preservation_loss_weight": settings.preservation_loss_weight,
+            "preservation_label_field": settings.preservation_label_field,
         }
         history.append(rec)
         with open(os.path.join(out_root, "history.json"), "w", encoding="utf-8") as f:

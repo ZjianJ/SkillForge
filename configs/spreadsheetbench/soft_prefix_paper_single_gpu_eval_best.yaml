@@ -1,0 +1,18 @@
+_base_: soft_prefix_paper_single_gpu_cached.yaml
+
+# Evaluation-only resume profile for the validation-selected checkpoint.
+
+train:
+  num_epochs: 0
+
+evaluation:
+  sel_env_num: 0
+  test_env_num: 0
+  eval_test: true
+
+env:
+  generation_batch_size: 2
+  checkpoint_eval_val: false
+
+soft_prefix:
+  checkpoint_path: outputs/SoftSkill_spreadsheetbench_paper_len8_seed1_single_gpu/best_prefix.pt

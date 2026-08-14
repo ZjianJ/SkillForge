@@ -12,6 +12,31 @@
 
 SoftSkill keeps the backbone model frozen. It initializes a prefix from a readable skill document, trains only a small soft delta with next-token prediction over answers or successful trajectories, and selects deployed checkpoints by held-out task validation. The result is a reusable soft-skill artifact that can replace long prompt-side skill text at inference time.
 
+> **本实验分支。** 在原始 SoftSkill 复现代码之上，本项目新增了 SpreadsheetBench
+> 成功轨迹缓存、Selective Soft Prompt Distillation、Top-64 全分布 Combined 定位器、
+> 未选位置 preservation KL、PRCB v1--v6 和 task-specific coverage oracle。完整实验设置、
+> 命令与逐项结果见 [实验复现手册](docs/EXPERIMENTS.md)；GitHub 备份边界见
+> [备份与版本管理](docs/GITHUB_BACKUP.md)。
+
+## 当前实验结论
+
+本分支的主要问题是：完整文本 Skill 对模型输出分布的影响，能否自动定位并压缩到长度 8
+的 soft prompt，而不是在整条成功轨迹上做等权 next-token prediction。
+
+- SearchQA 原始链路已经复现：test1400 hard/soft 为 77.14%/84.33%。
+- SpreadsheetBench 教师集：GPT-5.5 在 train80 中生成 61 条执行成功轨迹。
+- Skill 引起的正增益高度集中：Top-5% token 捕获 84.05% 全局正增益，Top-10%
+  捕获 96.12%。
+- 当前最佳共享方法是 Combined Top-5% + shared preservation KL：val40 为16/40，
+  匹配协议 test280 为101/280（36.07%），高于原始 SoftSkill 的85/280（30.36%）。
+- 裸 Qwen 在相同 test280 协议下为97/280（34.64%）；Combined 与裸模型差异不显著，
+  因此当前结果不能证明 soft prompt 优于裸模型。
+- PRCB v1--v6 没有稳定超过 Combined。task-specific oracle 将 core 从5%扩大到10%后，
+  同题自由生成由28/61提高到35/61；20%实验仍在运行。
+
+这些结果混合了开发集、正式测试集和同题 oracle，不能直接合并排名。审计后的完整表格与
+口径说明见 [实验结果总览](docs/experiment_results_overview.md)。
+
 ## Why SoftSkill?
 
 Modern agent systems increasingly rely on skill files, memories, or procedural instructions that tell a model how to inspect evidence, call tools, verify outputs, and avoid task-specific failure modes. These textual skills are portable and editable, but the model still has to translate them into behavior every time they are loaded.
@@ -32,6 +57,8 @@ This repository contains the public training and evaluation stack used for the S
 - Baseline and ablation configs for no-skill, hard-skill, LoRA, and soft-prefix runs.
 - Compatibility entry points under the `skillopt` Python package.
 - Released split manifests and scripts that materialize runnable benchmark data from upstream sources.
+- Selective token locators, Top-64 distribution caches, preservation objectives, PRCB trainers, and
+  task-specific oracle analyses added in this branch.
 
 SoftSkill is strongest in the single-round QA setting in the paper. Agentic execution is included as a harder boundary case: trajectory imitation can provide useful signal, but long-horizon procedural behavior is still more fragile than answer-behavior compression.
 
@@ -48,11 +75,15 @@ SoftSkill is strongest in the single-round QA setting in the paper. Agentic exec
 |   |-- data/                # Scripts that materialize runnable benchmark splits
 |   |-- train/               # Public launch scripts for training and evaluation
 |   |-- experiments/         # Research experiment launchers
-|   `-- analysis/            # SoftSkill analysis utilities
+|   |-- analysis/            # SoftSkill analysis utilities
+|   `-- *.py / *.sh          # SpreadsheetBench selective/PRCB experiment entry points
 |-- skillopt/                # Compatibility package and core training/evaluation code
 |-- tests/                   # Unit and integration tests
 |-- ckpt/                    # Checkpoint and skill notes; large artifacts excluded
-`-- docs/                    # Additional project documentation
+`-- docs/
+    |-- EXPERIMENTS.md       # Every experiment: purpose, setup, command, and result
+    |-- GITHUB_BACKUP.md     # Public/private boundary and GitHub backup workflow
+    `-- experiment_results_overview.md
 ```
 
 Generated rollouts, outputs, local corpora, model checkpoints, private environment files, and the separate `soft-skill/` paper repo are intentionally excluded from the public code release.
@@ -116,6 +147,15 @@ set +a
 
 Fill in only the backend variables you need. OpenAI-compatible endpoints reuse `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, and `AZURE_OPENAI_AUTH_MODE=openai_compatible`.
 
+For the SpreadsheetBench GPT-5.5 teacher, copy the public template into the ignored local-config
+directory. Never put a real key in a tracked YAML file:
+
+```bash
+mkdir -p configs/local
+cp configs/spreadsheetbench/teacher_rollout_gpt55.example.yaml \
+  configs/local/spreadsheetbench_paper_gpt55.local.yaml
+```
+
 ## Prepare Benchmark Data
 
 This repository includes lightweight split manifests under `data/*_id_split/` and `data/alfworld_path_split/`, but most benchmarks require materializing full examples from their original data sources before training or evaluation. Install the data helpers used by the preparation scripts:
@@ -175,6 +215,36 @@ python scripts/train_soft_prefix.py \
   --model_name Qwen/Qwen3.5-4B \
   --out_root outputs/SoftSkill_searchqa_example
 ```
+
+## Reproduce This Branch's SpreadsheetBench Experiments
+
+After preparing SpreadsheetBench and configuring the local model path if needed:
+
+```bash
+export SPREADSHEETBENCH_MODEL=Qwen/Qwen3.6-35B-A3B
+
+# Stage 1: locate tokens where the full text Skill changes Qwen's distribution.
+bash scripts/run_spreadsheetbench_selective_stage1.sh
+
+# Stage 2: Full CE / Random / Positive / Combined selective baselines.
+bash scripts/run_spreadsheetbench_selective_stage2.sh
+bash scripts/run_spreadsheetbench_full_distribution_locator_validation.sh
+
+# Same-task 5/10/20% coverage oracle.
+bash scripts/run_spreadsheetbench_coverage_ablation.sh
+```
+
+These commands reuse cached teacher rollouts. To regenerate the GPT-5.5 trajectories, configure the
+ignored local YAML first and run `scripts/reproduce_spreadsheetbench_paper.sh`. Exact hyperparameters,
+PRCB commands, evaluation protocols, known failed variants, and current numerical results are recorded
+in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
+
+## Repository and Artifact Management
+
+The repository intentionally ignores `outputs/`, `rollouts/`, complete datasets, model caches, API
+credentials, and checkpoint tensors. Code and reports can be pushed with ordinary Git; selected large
+artifacts should be published separately through Git LFS, a release, or object storage with SHA-256
+manifests. See [docs/GITHUB_BACKUP.md](docs/GITHUB_BACKUP.md) before the first push.
 
 ## Evaluate a SoftSkill
 

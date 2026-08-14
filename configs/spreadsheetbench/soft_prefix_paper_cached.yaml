@@ -1,0 +1,11 @@
+_base_: soft_prefix_paper.yaml
+
+# Training/evaluation config for an already collected GPT-5.5 trajectory cache.
+# It deliberately contains no API credentials.
+
+model:
+  target: gpt-5.5
+  target_backend: openai_chat
+  target_azure_openai_endpoint: ""
+  target_azure_openai_api_key: ""
+  target_azure_openai_auth_mode: openai_compatible

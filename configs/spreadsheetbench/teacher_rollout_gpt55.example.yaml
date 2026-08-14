@@ -1,0 +1,10 @@
+_base_: ../spreadsheetbench/soft_prefix_paper.yaml
+
+# Public template only. Copy this file to the ignored configs/local/ directory
+# and replace the placeholders there. Never commit the local copy.
+model:
+  target: gpt-5.5
+  target_backend: openai_chat
+  target_azure_openai_endpoint: REPLACE_ME
+  target_azure_openai_api_key: REPLACE_ME
+  target_azure_openai_auth_mode: openai_compatible

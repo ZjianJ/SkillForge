@@ -1,0 +1,12 @@
+_base_: soft_prefix_paper_cached.yaml
+
+# Single-GH200 execution profile for the paper setup. It keeps an effective
+# batch size of two while avoiding a second 35B model copy in a vLLM process.
+
+train:
+  batch_size: 1
+  accumulation: 2
+
+soft_prefix:
+  inference_backend: local_hf
+  gradient_checkpointing: true

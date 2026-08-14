@@ -97,3 +97,82 @@ def test_causal_prefix_can_be_inserted_at_batch_indices() -> None:
         [-100, -100, -100, 20, 21],
         [-100, -100, -100, -100, 22],
     ]
+
+
+def test_topk_residual_preservation_loss_is_zero_for_matching_distribution() -> None:
+    import torch
+
+    from skillopt.softprefix.model import _topk_residual_preservation_loss
+
+    logits = torch.tensor([[[2.0, 1.0, 0.0, -1.0]]], requires_grad=True)
+    logp = torch.log_softmax(logits.detach()[0, 0], dim=-1)
+    top_logp, top_ids = torch.topk(logp, k=2)
+    residual = torch.log1p(-top_logp.exp().sum())
+    loss = _topk_residual_preservation_loss(
+        torch,
+        logits,
+        logit_indices=torch.tensor([[0]]),
+        topk_ids=top_ids.view(1, 1, -1),
+        reference_topk_logp=top_logp.view(1, 1, -1),
+        reference_residual_log_mass=residual.view(1, 1),
+        mask=torch.tensor([[True]]),
+        prefix_length=0,
+    )
+    assert torch.allclose(loss, torch.tensor(0.0), atol=1e-6)
+    loss.backward()
+    assert logits.grad is not None
+
+
+def test_teacher_margin_hinge_only_penalizes_insufficient_gold_margin() -> None:
+    import torch
+
+    from skillopt.softprefix.model import _teacher_margin_hinge_loss
+
+    logits = torch.tensor([[[3.0, 1.0, 0.0], [0.0, 2.0, 1.0]]], requires_grad=True)
+    loss = _teacher_margin_hinge_loss(
+        torch,
+        logits,
+        logit_indices=torch.tensor([[0, 1]]),
+        target_ids=torch.tensor([[0, 1]]),
+        teacher_margin=torch.tensor([[1.5, 2.0]]),
+        mask=torch.tensor([[True, True]]),
+        prefix_length=0,
+    )
+    # First student margin is 2 (no penalty); second is 1 (penalty 1).
+    assert torch.allclose(loss, torch.tensor(0.5))
+    loss.backward()
+    assert logits.grad is not None
+
+
+def test_adapter_accumulation_normalizes_ce_and_kl_by_separate_token_counts() -> None:
+    import torch
+
+    from skillopt.softprefix.trainer import _normalized_adapter_accumulation_loss
+
+    first = SimpleNamespace(
+        loss=torch.tensor(0.0),
+        selected_loss=torch.tensor(2.0),
+        preservation_loss=torch.tensor(3.0),
+    )
+    second = SimpleNamespace(
+        loss=torch.tensor(0.0),
+        selected_loss=torch.tensor(5.0),
+        preservation_loss=torch.tensor(1.0),
+    )
+    loss = _normalized_adapter_accumulation_loss(
+        first,
+        selected_tokens=10,
+        group_selected_tokens=30,
+        preservation_tokens=4,
+        group_preservation_tokens=10,
+        preservation_weight=2.0,
+    ) + _normalized_adapter_accumulation_loss(
+        second,
+        selected_tokens=20,
+        group_selected_tokens=30,
+        preservation_tokens=6,
+        group_preservation_tokens=10,
+        preservation_weight=2.0,
+    )
+    # CE=(2*10+5*20)/30=4; KL=(3*4+1*6)/10=1.8; total=7.6.
+    assert torch.allclose(loss, torch.tensor(7.6))

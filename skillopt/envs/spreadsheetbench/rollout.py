@@ -902,6 +902,14 @@ def run_spreadsheet_batch_codegen(
         }
 
     def _record(res: dict, i: int) -> None:
+        # Checkpoint each completed task before moving on. SpreadsheetBench
+        # teacher rollouts can take hours, and only returning the in-memory
+        # list here makes an interrupted batch rerun every task completed since
+        # startup (including paid API calls).
+        with open(results_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(res, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
         results.append(res)
         status = "PASS" if res.get("hard") else ("TIMEOUT" if res.get("phase") == "timeout" else "FAIL")
         dt = time.time() - t0

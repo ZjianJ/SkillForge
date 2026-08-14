@@ -1,0 +1,188 @@
+\documentclass[10pt]{article}
+\usepackage[margin=0.7in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+
+\newcommand{\best}[1]{\textbf{#1}}
+\newcommand{\pp}{~pp}
+
+\begin{document}
+
+% Data provenance:
+% - Stage-1 statistics: outputs/SpreadsheetBench_selective_stage1_qwen36_gpt55
+% - Safe validation ablations: outputs/SpreadsheetBench_selective_stage2_len8_seed1_safe
+% - Shared-preservation validation: outputs/SpreadsheetBench_full_distribution_locator_len8_seed1_shared
+% - Matched test: outputs/SpreadsheetBench_combined_top0.05_shared_preserve_len8_epoch1_test280_softskill_matched
+
+\begin{table}[t]
+  \centering
+  \caption{Concentration of positive Skill-induced target-token gain on 61 successful
+  SpreadsheetBench trajectories (54,929 selectable tokens). The selected budget is
+  applied independently to each trajectory.}
+  \label{tab:gain-concentration}
+  \small
+  \begin{tabular}{rrrrr}
+    \toprule
+    Token budget & Random capture & Global capture & Mean trajectory capture & 95\% bootstrap CI \\
+    \midrule
+     1\% &  0.99\% & 42.11\% & 41.97\% & [39.85, 44.19]\% \\
+     2\% &  1.99\% & 59.72\% & 59.13\% & [57.24, 61.42]\% \\
+     5\% &  4.99\% & 84.05\% & 82.99\% & [81.83, 84.40]\% \\
+    10\% &  9.97\% & 96.12\% & 95.42\% & [94.90, 95.97]\% \\
+    20\% & 19.84\% & 99.76\% & 99.62\% & [99.54, 99.69]\% \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \centering
+  \caption{Top-5\% token localization using target-token gain alone or gain combined
+  with full-vocabulary Jensen--Shannon divergence. Combined is defined as
+  $\max(\Delta\log p(y_t),0)\times\mathrm{JS}(p_{\mathrm{Skill}},p_{\mathrm{NoSkill}})$.}
+  \label{tab:locator-statistics}
+  \small
+  \begin{tabular}{lrrr}
+    \toprule
+    Locator & Positive-gain capture & Exact-JS capture & Combined-mass capture \\
+    \midrule
+    Positive gain & \best{81.91\%} & 44.69\% & 95.90\% \\
+    Positive gain $\times$ JS & 76.23\% & \best{50.61\%} & \best{97.56\%} \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{2pt}
+  \parbox{0.94\linewidth}{\footnotesize
+  The two selected sets have mean Jaccard similarity 0.6974. Combined retains
+  93.06\% of the positive-gain mass captured by the Positive locator. Skill and
+  No-Skill Top-64 caches cover 99.859\% and 99.829\% of probability mass,
+  respectively; exact JS itself is computed over the full vocabulary.}
+\end{table}
+
+\begin{table*}[t]
+  \centering
+  \caption{SpreadsheetBench validation ablations. All reported main rows use frozen
+  Qwen3.6-35B-A3B, one shared length-8 prefix, seed 1, greedy generation, and the
+  same 40-task validation split. ``Independent'' preservation sets are sampled
+  separately for each method; ``Shared'' denotes exactly matched positions.}
+  \label{tab:validation-ablation}
+  \small
+  \setlength{\tabcolsep}{5pt}
+  \begin{tabular}{lrrrrrlr}
+    \toprule
+    Method & CE tokens & CE coverage & KL tokens & KL weight & Epochs run & Best epoch & Success \\
+    \midrule
+    Full-trajectory CE & 54,990 & 100.00\% & 0 & 0 & 3 & 1 & 11/40 (27.5\%) \\
+    Random 5\% core & 2,838 & 5.06\% & 0 & 0 & 3 & 3 & 15/40 (37.5\%) \\
+    Positive 5\% core$^{\dagger}$ & 2,838 & 5.06\% & 0 & 0 & 2/3 & 2 & 13/40 (32.5\%) \\
+    Random 5\% core + independent KL & 2,838 & 5.06\% & 2,777 & 1 & 1 & 1 & 15/40 (37.5\%) \\
+    Positive 5\% core + independent KL & 2,838 & 5.06\% & 2,777 & 1 & 3 & 1 & \best{18/40 (45.0\%)} \\
+    Positive 5\% core $L2/R8$ + independent KL & 19,424 & 35.25\% & 2,777 & 1 & 1 & 1 & 12/40 (30.0\%) \\
+    \midrule
+    Positive 5\% core + shared KL & 2,838 & 5.06\% & 2,777 & 1 & 1 & 1 & 10/40 (25.0\%) \\
+    Combined 5\% core + shared KL & 2,838 & 5.06\% & 2,777 & 1 & 1 & 1 & \best{16/40 (40.0\%)} \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{2pt}
+  \parbox{0.96\linewidth}{\footnotesize
+  $^{\dagger}$The no-KL Positive run stopped after epoch 2; 13/40 is the best
+  observed result among completed epochs and is not a completed three-epoch result.
+  CE-token counts include 61 always-supervised EOS tokens. Independent-KL rows are
+  diagnostic because their preservation positions are not identical across methods;
+  the final two rows form the strictly controlled locator comparison.}
+\end{table*}
+
+\begin{table}[t]
+  \centering
+  \caption{Strictly paired validation comparison with identical CE budget and
+  per-trajectory shared preservation positions.}
+  \label{tab:shared-preservation-validation}
+  \small
+  \begin{tabular}{lrrrrr}
+    \toprule
+    Locator & Success & Exec. error & Eval. mismatch & Selected CE & Preserve KL \\
+    \midrule
+    Positive & 10/40 (25.0\%) & 14 & 15 & 3.2018 & 0.00742 \\
+    Combined & \best{16/40 (40.0\%)} & \best{9} & 15 & \best{2.7405} & \best{0.00661} \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{2pt}
+  \parbox{0.94\linewidth}{\footnotesize
+  Combined improves by 6 tasks (15.0 percentage points). The exact two-sided
+  paired sign test gives $p=0.1460$; hence the 40-task difference is directional
+  but not statistically significant.}
+\end{table}
+
+\begin{table*}[t]
+  \centering
+  \caption{Frozen-checkpoint results on the 280-task SpreadsheetBench test split.
+  ``Matched'' means the SoftSkill evaluation protocol is matched at
+  \texttt{max\_new\_tokens}=8192 and generation batch size 2.}
+  \label{tab:test-main}
+  \small
+  \begin{tabular}{lrrrrrr}
+    \toprule
+    Method & Matched & Max new tokens & Gen. batch & Success & $\Delta$ vs. SoftSkill & Paired $p$ \\
+    \midrule
+    Original SoftSkill & Yes & 8192 & 2 & 85/280 (30.36\%) & -- & -- \\
+    Positive 5\% core + KL (diagnostic) & No & 4096 & 8 & 91/280 (32.50\%) & +2.14\pp & -- \\
+    Combined 5\% core + shared KL & Yes & 8192 & 2 & \best{101/280 (36.07\%)} & \best{+5.71\pp} & 0.0479 \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{2pt}
+  \parbox{0.95\linewidth}{\footnotesize
+  For the matched Combined--SoftSkill comparison, Combined-only and
+  SoftSkill-only successes are 37 and 21, respectively (64 tasks are solved by
+  both). The reported $p$ is an exact two-sided McNemar/sign test and is nominally,
+  but only marginally, significant at 0.05. Results use one training seed.}
+\end{table*}
+
+\begin{table}[t]
+  \centering
+  \caption{Breakdown of the matched 280-task test comparison. The gain is entirely
+  on cell-level tasks; Combined reduces semantic/evaluation mismatches at the cost
+  of more execution failures.}
+  \label{tab:test-breakdown}
+  \small
+  \begin{tabular}{lrrr}
+    \toprule
+    Breakdown & SoftSkill & Combined & Difference \\
+    \midrule
+    \multicolumn{4}{l}{\emph{Success by task type}} \\
+    Cell-level ($n=193$) & 45 (23.32\%) & \best{61 (31.61\%)} & +16 (+8.29\pp) \\
+    Sheet-level ($n=87$) & 40 (45.98\%) & 40 (45.98\%) & 0 \\
+    \midrule
+    \multicolumn{4}{l}{\emph{Outcome category}} \\
+    Success & 85 & \best{101} & +16 \\
+    Executable but mismatched & 153 & \best{126} & -27 \\
+    Execution error & \best{41} & 52 & +11 \\
+    No test case & 1 & 1 & 0 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\clearpage
+\begin{table*}[t]
+  \centering
+  \caption{Superseded diagnostic runs retained for experiment auditing but excluded
+  from the main comparisons. These runs either predate the final input-safety path,
+  diagnose generation batch dependence, or stopped before the configured epochs.}
+  \label{tab:superseded-runs}
+  \small
+  \begin{tabular}{llrrrl}
+    \toprule
+    Run family & Method & Completed epochs & Gen. batch & Best success & Status \\
+    \midrule
+    Initial & Full CE & 1/3 & 2 & 4/40 (10.0\%) & Batch-dependence diagnostic \\
+    Initial-b8 & Full CE & 1/3 & 8 & 12/40 (30.0\%) & Batch-dependence diagnostic \\
+    Fixed & Full CE & 3/3 & 8 & 14/40 (35.0\%) & Superseded by safe rerun \\
+    Fixed & Random 5\% core & 3/3 & 8 & 16/40 (40.0\%) & Superseded by safe rerun \\
+    Fixed & Positive 5\% core & 2/3 & 8 & 15/40 (37.5\%) & Incomplete; superseded \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\end{document}

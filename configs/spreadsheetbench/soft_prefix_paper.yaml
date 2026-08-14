@@ -1,0 +1,56 @@
+_base_: soft_prefix.yaml
+
+# Paper-aligned SpreadsheetBench agentic setting (Table 2 / Table 17).
+# Secrets are intentionally kept out of this tracked config. Create
+# configs/local/spreadsheetbench_paper_gpt55.local.yaml and inherit this file.
+
+model:
+  target: gpt-5.5
+  target_backend: openai_chat
+  reasoning_effort: ""
+
+train:
+  num_epochs: 3
+  batch_size: 2
+  accumulation: 1
+  seed: 1
+
+evaluation:
+  gate_metric: soft
+  sel_env_num: 16
+  test_env_num: 0
+  eval_test: true
+
+env:
+  workers: 8
+
+soft_prefix:
+  model_name: Qwen/Qwen3.6-35B-A3B
+  prefix_length: 8
+  init_strategy: text
+  init_text_path: ckpt/spreadsheetbench/gpt5.5_skill.md
+  injection_position: prompt_start
+  learning_rate: 0.001
+  weight_decay: 0.0
+  max_prompt_tokens: 16384
+  max_target_tokens: 8192
+  max_new_tokens: 8192
+  trajectory_max_new_tokens: 16384
+  torch_dtype: auto
+  device: auto
+  trust_remote_code: false
+  generation_temperature: 0.0
+  training_data: trajectory_sft
+  rewind_ckpt: false
+  trajectory_use_skill: true
+  trajectory_rollout_backend: openai_compatible
+  trajectory_rollout_dir: rollouts/teacher_gpt55_spreadsheetbench_rollouts
+  trajectory_min_hard: 1.0
+  trajectory_min_soft: 0.0
+  trajectory_max_examples: 0
+  trajectory_rollouts_per_task: 1
+  trajectory_max_context_chars: 30000
+  strip_trajectory_thoughts: true
+  inference_backend: vllm_prompt_embeds
+  inference_base_url: http://127.0.0.1:8020
+  inference_timeout_seconds: 600

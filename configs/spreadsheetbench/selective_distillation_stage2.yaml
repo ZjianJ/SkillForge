@@ -1,0 +1,43 @@
+_base_: soft_prefix_paper_single_gpu_cached.yaml
+
+# Stage-2 screen: frozen Qwen, length-8 soft prefix, clean GPT-5.5 success
+# trajectories, full 40-task validation split, and no test-set access.
+
+train:
+  num_epochs: 3
+  batch_size: 1
+  accumulation: 2
+  seed: 1
+
+evaluation:
+  gate_metric: hard
+  sel_env_num: 40
+  test_env_num: 0
+  eval_test: false
+
+env:
+  generation_batch_size: 8
+  checkpoint_eval_val: false
+
+soft_prefix:
+  model_name: Qwen/Qwen3.6-35B-A3B
+  prefix_length: 8
+  learning_rate: 0.001
+  init_strategy: text
+  init_text_path: ckpt/spreadsheetbench/gpt5.5_skill.md
+  trajectory_examples_path: outputs/SpreadsheetBench_selective_stage2_manifests/clean_full.jsonl
+  trajectory_use_skill: false
+  require_clean_trajectory_prompt: true
+  selective_label_field: ""
+  always_supervise_eos: true
+  token_weighted_accumulation: true
+  # Disabled for ordinary baselines. The preservation runner overrides this
+  # to 1.0 and loads no-Skill Top-64 references at matched unselected tokens.
+  preservation_loss_weight: 0.0
+  preservation_label_field: preserve_indices
+  # The longest cached successful teacher target is 3,647 tokens. A 4,096
+  # generation cap covers it while bounding non-EOS runaway validation output.
+  max_new_tokens: 4096
+  inference_backend: local_hf
+  gradient_checkpointing: true
+  checkpoint_path: ""

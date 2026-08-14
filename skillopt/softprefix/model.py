@@ -63,6 +63,68 @@ def _masked_causal_lm_loss(torch, logits, labels):
     return torch.nn.functional.cross_entropy(active_logits, active_labels, ignore_index=ignore_index)
 
 
+def _topk_residual_preservation_loss(
+    torch,
+    logits,
+    *,
+    logit_indices,
+    topk_ids,
+    reference_topk_logp,
+    reference_residual_log_mass,
+    mask,
+    prefix_length: int,
+):
+    """KL(reference || soft-prefix) over reference Top-k plus one residual bucket."""
+    active = mask.to(dtype=torch.bool, device=logits.device)
+    if not bool(active.any()):
+        return logits.sum() * 0.0
+    rows = torch.arange(logits.shape[0], device=logits.device)[:, None].expand_as(active)
+    positions = logit_indices.to(logits.device) + int(prefix_length)
+    active_logits = logits[rows[active], positions[active]].float()
+    active_ids = topk_ids.to(logits.device)[active]
+    reference_logp = reference_topk_logp.to(logits.device)[active].float()
+    reference_residual = reference_residual_log_mass.to(logits.device)[active].float()
+
+    student_log_normalizer = torch.logsumexp(active_logits, dim=-1, keepdim=True)
+    student_topk_logp = active_logits.gather(1, active_ids) - student_log_normalizer
+    student_topk_mass = student_topk_logp.exp().sum(dim=-1).clamp(max=1.0 - 1e-7)
+    student_residual = torch.log1p(-student_topk_mass)
+
+    topk_kl = (reference_logp.exp() * (reference_logp - student_topk_logp)).sum(dim=-1)
+    residual_kl = reference_residual.exp() * (reference_residual - student_residual)
+    return (topk_kl + residual_kl).mean()
+
+
+def _teacher_margin_hinge_loss(
+    torch,
+    logits,
+    *,
+    logit_indices,
+    target_ids,
+    teacher_margin,
+    mask,
+    prefix_length: int,
+):
+    """Hinge loss that matches the hard-Skill gold-vs-competitor margin."""
+    active = mask.to(dtype=torch.bool, device=logits.device)
+    if not bool(active.any()):
+        return logits.sum() * 0.0
+    rows = torch.arange(logits.shape[0], device=logits.device)[:, None].expand_as(active)
+    positions = logit_indices.to(logits.device) + int(prefix_length)
+    active_logits = logits[rows[active], positions[active]].float()
+    targets = target_ids.to(logits.device)[active]
+    target_logits = active_logits.gather(1, targets[:, None]).squeeze(1)
+    top_values, top_ids = torch.topk(active_logits, k=2, dim=-1)
+    competitor_logits = torch.where(
+        top_ids[:, 0] == targets,
+        top_values[:, 1],
+        top_values[:, 0],
+    )
+    student_margin = target_logits - competitor_logits
+    reference_margin = teacher_margin.to(logits.device)[active].float()
+    return torch.relu(reference_margin - student_margin).mean()
+
+
 class SoftPrefixCausalLM:
     """Owns a frozen causal LM and a trainable prefix embedding parameter."""
 
@@ -175,23 +237,18 @@ class SoftPrefixCausalLM:
         )
 
         if prefix_insert_idx is None:
-            inputs_embeds = self.torch.cat([prefix, token_embeds], dim=1)
-            full_attention_mask = self.torch.cat(
-                [prefix_mask.unsqueeze(0).expand(batch_size, -1), attention_mask],
-                dim=1,
-            )
-            full_labels = None
-            if labels_on_device is not None:
-                prefix_labels = self.torch.full(
-                    (batch_size, self.prefix_length),
-                    -100,
-                    dtype=labels_on_device.dtype,
-                    device=self.device,
-                )
-                full_labels = self.torch.cat([prefix_labels, labels_on_device], dim=1)
-            return inputs_embeds, full_attention_mask, full_labels
-
-        insert_indices = self.torch.as_tensor(prefix_insert_idx, device=self.device).view(-1)
+            # Text generation batches are left-padded. Insert the prefix at
+            # the first active prompt token for every row, yielding
+            # PAD -> prefix -> prompt. Prepending it to the padded tensor would
+            # yield prefix -> PAD -> prompt and make greedy output depend on
+            # which other prompts happen to share the batch.
+            insert_indices = attention_mask.to(dtype=self.torch.long).argmax(dim=1)
+        else:
+            insert_indices = self.torch.as_tensor(prefix_insert_idx, device=self.device).view(-1)
+            # Explicit insertion indices are relative to each unpadded prompt.
+            # Shift them across any tokenizer-added left padding at generation.
+            left_padding = attention_mask.to(dtype=self.torch.long).argmax(dim=1)
+            insert_indices = insert_indices + left_padding
         if int(insert_indices.numel()) != batch_size:
             raise ValueError(
                 f"prefix_insert_idx must have one entry per batch row, got {int(insert_indices.numel())} for {batch_size}"
@@ -248,7 +305,76 @@ class SoftPrefixCausalLM:
             inputs_embeds=inputs_embeds,
             attention_mask=full_attention_mask,
         )
-        return SimpleNamespace(loss=_masked_causal_lm_loss(self.torch, outputs.logits, full_labels))
+        selected_loss = _masked_causal_lm_loss(self.torch, outputs.logits, full_labels)
+        preservation_weight = float(batch.get("preservation_loss_weight", 0.0))
+        preservation_loss = selected_loss.detach().new_zeros(())
+        if "preservation_mask" in batch:
+            preservation_loss = _topk_residual_preservation_loss(
+                self.torch,
+                outputs.logits,
+                logit_indices=batch["preservation_logit_indices"],
+                topk_ids=batch["preservation_topk_ids"],
+                reference_topk_logp=batch["preservation_topk_logp"],
+                reference_residual_log_mass=batch["preservation_residual_log_mass"],
+                mask=batch["preservation_mask"],
+                prefix_length=self.prefix_length,
+            )
+        teacher_kl_weight = float(batch.get("teacher_kl_loss_weight", 0.0))
+        teacher_margin_weight = float(batch.get("teacher_margin_loss_weight", 0.0))
+        teacher_kl_loss = selected_loss.detach().new_zeros(())
+        teacher_margin_loss = selected_loss.detach().new_zeros(())
+        if "teacher_mask" in batch:
+            teacher_kl_loss = _topk_residual_preservation_loss(
+                self.torch,
+                outputs.logits,
+                logit_indices=batch["teacher_logit_indices"],
+                topk_ids=batch["teacher_topk_ids"],
+                reference_topk_logp=batch["teacher_topk_logp"],
+                reference_residual_log_mass=batch["teacher_residual_log_mass"],
+                mask=batch["teacher_mask"],
+                prefix_length=self.prefix_length,
+            )
+            teacher_margin_loss = _teacher_margin_hinge_loss(
+                self.torch,
+                outputs.logits,
+                logit_indices=batch["teacher_logit_indices"],
+                target_ids=batch["teacher_target_ids"],
+                teacher_margin=batch["teacher_margin"],
+                mask=batch["teacher_mask"],
+                prefix_length=self.prefix_length,
+            )
+        retention_weight = float(batch.get("retention_loss_weight", 0.0))
+        retention_loss = selected_loss.detach().new_zeros(())
+        if "retention_mask" in batch:
+            retention_loss = _topk_residual_preservation_loss(
+                self.torch,
+                outputs.logits,
+                logit_indices=batch["retention_logit_indices"],
+                topk_ids=batch["retention_topk_ids"],
+                reference_topk_logp=batch["retention_topk_logp"],
+                reference_residual_log_mass=batch["retention_residual_log_mass"],
+                mask=batch["retention_mask"],
+                prefix_length=self.prefix_length,
+            )
+        total_loss = selected_loss
+        if "preservation_mask" in batch:
+            total_loss = total_loss + preservation_weight * preservation_loss
+        if "teacher_mask" in batch:
+            total_loss = (
+                total_loss
+                + teacher_kl_weight * teacher_kl_loss
+                + teacher_margin_weight * teacher_margin_loss
+            )
+        if "retention_mask" in batch:
+            total_loss = total_loss + retention_weight * retention_loss
+        return SimpleNamespace(
+            loss=total_loss,
+            selected_loss=selected_loss,
+            preservation_loss=preservation_loss,
+            teacher_kl_loss=teacher_kl_loss,
+            teacher_margin_loss=teacher_margin_loss,
+            retention_loss=retention_loss,
+        )
 
     def generate_from_prompt(
         self,

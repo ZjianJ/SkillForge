@@ -567,12 +567,30 @@ class TextTrajectoryPrefixDataset:
         max_prompt_tokens: int,
         max_target_tokens: int,
         injection_position: str = "prompt_start",
+        selective_label_field: str = "",
+        always_supervise_eos: bool = True,
+        preservation_loss_weight: float = 0.0,
+        preservation_label_field: str = "preserve_indices",
+        teacher_distillation_loss_weight: float = 0.0,
+        teacher_label_field: str = "selected_indices",
+        retention_loss_weight: float = 0.0,
+        retention_label_field: str = "replay_indices",
+        retention_cache_field: str = "retention_cache",
     ) -> None:
         self.items = list(items)
         self.tokenizer = tokenizer
         self.max_prompt_tokens = int(max_prompt_tokens)
         self.max_target_tokens = int(max_target_tokens)
         self.injection_position = normalize_prefix_injection_position(injection_position)
+        self.selective_label_field = str(selective_label_field or "").strip()
+        self.always_supervise_eos = bool(always_supervise_eos)
+        self.preservation_loss_weight = float(preservation_loss_weight)
+        self.preservation_label_field = str(preservation_label_field or "").strip()
+        self.teacher_distillation_loss_weight = float(teacher_distillation_loss_weight)
+        self.teacher_label_field = str(teacher_label_field or "").strip()
+        self.retention_loss_weight = float(retention_loss_weight)
+        self.retention_label_field = str(retention_label_field or "").strip()
+        self.retention_cache_field = str(retention_cache_field or "").strip()
 
     def __len__(self) -> int:
         return len(self.items)
@@ -626,11 +644,13 @@ class TextTrajectoryPrefixDataset:
                 max_length=self.max_target_tokens,
             )["input_ids"]
             input_ids = prompt_ids + target_ids
-            labels = [-100] * len(prompt_ids) + target_ids
+            target_labels = self._target_labels(item, target_ids)
+            labels = [-100] * len(prompt_ids) + target_labels
             return EncodedExample(
                 input_ids=input_ids,
                 attention_mask=[1] * len(input_ids),
                 labels=labels,
+                extra_inputs=self._extra_inputs(item, len(prompt_ids), target_ids),
                 prefix_insert_idx=(
                     min(prefix_insert_idx, len(prompt_ids))
                     if prefix_insert_idx is not None
@@ -673,17 +693,242 @@ class TextTrajectoryPrefixDataset:
             max_length=self.max_target_tokens,
         )["input_ids"]
         input_ids = prompt_ids + target_ids
-        labels = [-100] * len(prompt_ids) + target_ids
+        target_labels = self._target_labels(item, target_ids)
+        labels = [-100] * len(prompt_ids) + target_labels
         return EncodedExample(
             input_ids=input_ids,
             attention_mask=[1] * len(input_ids),
             labels=labels,
+            extra_inputs=self._extra_inputs(item, len(prompt_ids), target_ids),
             prefix_insert_idx=(
                 min(prefix_insert_idx, len(prompt_ids))
                 if prefix_insert_idx is not None
                 else None
             ),
         )
+
+    def _target_labels(self, item: dict, target_ids: list[int]) -> list[int]:
+        """Mask target-relative positions for selective trajectory training."""
+        if not self.selective_label_field:
+            return list(target_ids)
+        if self.selective_label_field not in item:
+            raise ValueError(
+                f"Selective label field {self.selective_label_field!r} is missing "
+                f"from trajectory {item.get('id', '<unknown>')!r}"
+            )
+        selected = {
+            int(position)
+            for position in item[self.selective_label_field]
+            if 0 <= int(position) < len(target_ids)
+        }
+        if self.always_supervise_eos and target_ids:
+            selected.add(len(target_ids) - 1)
+        if not selected:
+            raise ValueError(
+                f"Trajectory {item.get('id', '<unknown>')!r} has no selected target tokens"
+            )
+        return [token_id if index in selected else -100 for index, token_id in enumerate(target_ids)]
+
+    def _preservation_inputs(
+        self,
+        item: dict,
+        prompt_length: int,
+        target_ids: list[int],
+    ) -> dict[str, Any] | None:
+        """Load no-Skill Top-k references for target-relative preserve positions."""
+        if self.preservation_loss_weight <= 0:
+            return None
+        field = self.preservation_label_field
+        if not field or field not in item:
+            raise ValueError(
+                f"Preservation label field {field!r} is missing from trajectory "
+                f"{item.get('id', '<unknown>')!r}"
+            )
+        positions = [
+            int(position)
+            for position in item[field]
+            if 0 <= int(position) < max(0, len(target_ids) - 1)
+        ]
+        if not positions:
+            raise ValueError(
+                f"Trajectory {item.get('id', '<unknown>')!r} has no preservation positions"
+            )
+        cache_path = str(item.get("score_cache") or "")
+        if not cache_path:
+            raise ValueError("Distribution preservation requires score_cache in every trajectory")
+        import numpy as np
+
+        with np.load(cache_path) as cached:
+            required = {
+                "target_ids",
+                "clean_topk_ids",
+                "clean_topk_logp",
+                "clean_residual_log_mass",
+            }
+            missing = required - set(cached.files)
+            if missing:
+                raise ValueError(
+                    f"Score cache {cache_path} lacks clean distribution fields: {sorted(missing)}"
+                )
+            if cached["target_ids"].astype(np.int64).tolist() != list(target_ids):
+                raise ValueError(f"Tokenizer/cache mismatch for trajectory {item.get('id')!r}")
+            topk_ids = cached["clean_topk_ids"][positions].astype(np.int64).tolist()
+            topk_logp = cached["clean_topk_logp"][positions].astype(np.float32).tolist()
+            residual_log_mass = (
+                cached["clean_residual_log_mass"][positions].astype(np.float32).tolist()
+            )
+        return {
+            # Index of the causal logit in the original prompt+target sequence.
+            # The model wrapper adds the prefix-length offset after insertion.
+            "preservation_logit_indices": [prompt_length + position - 1 for position in positions],
+            "preservation_topk_ids": topk_ids,
+            "preservation_topk_logp": topk_logp,
+            "preservation_residual_log_mass": residual_log_mass,
+        }
+
+    def _teacher_inputs(
+        self,
+        item: dict,
+        prompt_length: int,
+        target_ids: list[int],
+    ) -> dict[str, Any] | None:
+        """Load hard-Skill Top-k and decision margins on selected gold positions."""
+        if self.teacher_distillation_loss_weight <= 0:
+            return None
+        field = self.teacher_label_field
+        if not field or field not in item:
+            raise ValueError(
+                f"Teacher label field {field!r} is missing from trajectory "
+                f"{item.get('id', '<unknown>')!r}"
+            )
+        positions = sorted({
+            int(position)
+            for position in item[field]
+            if 0 <= int(position) < max(0, len(target_ids) - 1)
+        })
+        if not positions:
+            raise ValueError(
+                f"Trajectory {item.get('id', '<unknown>')!r} has no teacher positions"
+            )
+        cache_path = str(item.get("score_cache") or "")
+        if not cache_path:
+            raise ValueError("Teacher distillation requires score_cache in every trajectory")
+        import numpy as np
+
+        with np.load(cache_path) as cached:
+            required = {
+                "target_ids",
+                "skill_target_logp",
+                "skill_topk_ids",
+                "skill_topk_logp",
+                "skill_residual_log_mass",
+            }
+            missing = required - set(cached.files)
+            if missing:
+                raise ValueError(
+                    f"Score cache {cache_path} lacks Skill distribution fields: {sorted(missing)}"
+                )
+            cached_targets = cached["target_ids"].astype(np.int64)
+            if cached_targets.tolist() != list(target_ids):
+                raise ValueError(f"Tokenizer/cache mismatch for trajectory {item.get('id')!r}")
+            selected_targets = cached_targets[positions]
+            topk_ids = cached["skill_topk_ids"][positions].astype(np.int64)
+            topk_logp = cached["skill_topk_logp"][positions].astype(np.float32)
+            alternatives = np.where(
+                topk_ids != selected_targets[:, None],
+                topk_logp,
+                -np.inf,
+            )
+            competitor_logp = alternatives.max(axis=1)
+            if not np.isfinite(competitor_logp).all():
+                raise ValueError(f"No non-target Skill alternative in {cache_path}")
+            teacher_margin = (
+                cached["skill_target_logp"][positions].astype(np.float32)
+                - competitor_logp
+            )
+            residual_log_mass = cached["skill_residual_log_mass"][positions].astype(np.float32)
+        return {
+            "teacher_logit_indices": [prompt_length + position - 1 for position in positions],
+            "teacher_topk_ids": topk_ids.tolist(),
+            "teacher_topk_logp": topk_logp.tolist(),
+            "teacher_residual_log_mass": residual_log_mass.tolist(),
+            "teacher_target_ids": selected_targets.tolist(),
+            "teacher_margin": teacher_margin.tolist(),
+        }
+
+    def _retention_inputs(
+        self,
+        item: dict,
+        prompt_length: int,
+        target_ids: list[int],
+    ) -> dict[str, Any] | None:
+        """Load the stage-start prefix distribution on previously solved tokens."""
+        if self.retention_loss_weight <= 0:
+            return None
+        field = self.retention_label_field
+        positions = sorted({
+            int(position)
+            for position in item.get(field, [])
+            if 0 <= int(position) < max(0, len(target_ids) - 1)
+        })
+        # The first residual stage has no previously solved positions.
+        if not positions:
+            return None
+        cache_path = str(item.get(self.retention_cache_field) or "")
+        if not cache_path:
+            raise ValueError(
+                f"Retention cache field {self.retention_cache_field!r} is missing "
+                f"from trajectory {item.get('id', '<unknown>')!r}"
+            )
+        import numpy as np
+
+        with np.load(cache_path) as cached:
+            required = {
+                "target_ids",
+                "current_topk_ids",
+                "current_topk_logp",
+                "current_residual_log_mass",
+            }
+            missing = required - set(cached.files)
+            if missing:
+                raise ValueError(
+                    f"Retention cache {cache_path} lacks fields: {sorted(missing)}"
+                )
+            if cached["target_ids"].astype(np.int64).tolist() != list(target_ids):
+                raise ValueError(f"Tokenizer/cache mismatch for trajectory {item.get('id')!r}")
+            topk_ids = cached["current_topk_ids"][positions].astype(np.int64).tolist()
+            topk_logp = cached["current_topk_logp"][positions].astype(np.float32).tolist()
+            residual_log_mass = (
+                cached["current_residual_log_mass"][positions]
+                .astype(np.float32)
+                .tolist()
+            )
+        return {
+            "retention_logit_indices": [
+                prompt_length + position - 1 for position in positions
+            ],
+            "retention_topk_ids": topk_ids,
+            "retention_topk_logp": topk_logp,
+            "retention_residual_log_mass": residual_log_mass,
+        }
+
+    def _extra_inputs(
+        self,
+        item: dict,
+        prompt_length: int,
+        target_ids: list[int],
+    ) -> dict[str, Any] | None:
+        extra: dict[str, Any] = {}
+        preservation = self._preservation_inputs(item, prompt_length, target_ids)
+        teacher = self._teacher_inputs(item, prompt_length, target_ids)
+        retention = self._retention_inputs(item, prompt_length, target_ids)
+        if preservation:
+            extra.update(preservation)
+        if teacher:
+            extra.update(teacher)
+        if retention:
+            extra.update(retention)
+        return extra or None
 
 
 def _messages_include_tool_calls(messages: list[dict]) -> bool:
@@ -1032,6 +1277,153 @@ class PrefixBatchCollator:
             for ex in examples
             for key in (ex.extra_inputs or {})
         }
+        preservation_keys = {
+            "preservation_logit_indices",
+            "preservation_topk_ids",
+            "preservation_topk_logp",
+            "preservation_residual_log_mass",
+        }
+        if extra_keys & preservation_keys:
+            import torch
+
+            if not preservation_keys.issubset(extra_keys):
+                raise ValueError("Incomplete distribution-preservation inputs in batch")
+            row_inputs = [ex.extra_inputs or {} for ex in examples]
+            max_positions = max(len(row["preservation_logit_indices"]) for row in row_inputs)
+            top_k = len(row_inputs[0]["preservation_topk_ids"][0])
+            batch["preservation_mask"] = torch.zeros(
+                (len(examples), max_positions), dtype=torch.bool
+            )
+            batch["preservation_logit_indices"] = torch.full(
+                (len(examples), max_positions), -1, dtype=torch.long
+            )
+            batch["preservation_topk_ids"] = torch.zeros(
+                (len(examples), max_positions, top_k), dtype=torch.long
+            )
+            batch["preservation_topk_logp"] = torch.zeros(
+                (len(examples), max_positions, top_k), dtype=torch.float32
+            )
+            batch["preservation_residual_log_mass"] = torch.zeros(
+                (len(examples), max_positions), dtype=torch.float32
+            )
+            for row_index, row in enumerate(row_inputs):
+                count = len(row["preservation_logit_indices"])
+                if count <= 0:
+                    raise ValueError("Every preservation batch row must contain at least one position")
+                if len(row["preservation_topk_ids"][0]) != top_k:
+                    raise ValueError("All preservation references must use the same top-k")
+                batch["preservation_mask"][row_index, :count] = True
+                batch["preservation_logit_indices"][row_index, :count] = torch.tensor(
+                    row["preservation_logit_indices"], dtype=torch.long
+                )
+                batch["preservation_topk_ids"][row_index, :count] = torch.tensor(
+                    row["preservation_topk_ids"], dtype=torch.long
+                )
+                batch["preservation_topk_logp"][row_index, :count] = torch.tensor(
+                    row["preservation_topk_logp"], dtype=torch.float32
+                )
+                batch["preservation_residual_log_mass"][row_index, :count] = torch.tensor(
+                    row["preservation_residual_log_mass"], dtype=torch.float32
+                )
+            extra_keys -= preservation_keys
+        teacher_keys = {
+            "teacher_logit_indices",
+            "teacher_topk_ids",
+            "teacher_topk_logp",
+            "teacher_residual_log_mass",
+            "teacher_target_ids",
+            "teacher_margin",
+        }
+        if extra_keys & teacher_keys:
+            import torch
+
+            if not teacher_keys.issubset(extra_keys):
+                raise ValueError("Incomplete teacher-distillation inputs in batch")
+            row_inputs = [ex.extra_inputs or {} for ex in examples]
+            max_positions = max(len(row["teacher_logit_indices"]) for row in row_inputs)
+            top_k = len(row_inputs[0]["teacher_topk_ids"][0])
+            batch["teacher_mask"] = torch.zeros(
+                (len(examples), max_positions), dtype=torch.bool
+            )
+            batch["teacher_logit_indices"] = torch.full(
+                (len(examples), max_positions), -1, dtype=torch.long
+            )
+            batch["teacher_topk_ids"] = torch.zeros(
+                (len(examples), max_positions, top_k), dtype=torch.long
+            )
+            batch["teacher_topk_logp"] = torch.zeros(
+                (len(examples), max_positions, top_k), dtype=torch.float32
+            )
+            batch["teacher_residual_log_mass"] = torch.zeros(
+                (len(examples), max_positions), dtype=torch.float32
+            )
+            batch["teacher_target_ids"] = torch.zeros(
+                (len(examples), max_positions), dtype=torch.long
+            )
+            batch["teacher_margin"] = torch.zeros(
+                (len(examples), max_positions), dtype=torch.float32
+            )
+            for row_index, row in enumerate(row_inputs):
+                count = len(row["teacher_logit_indices"])
+                if count <= 0:
+                    raise ValueError("Every teacher batch row must contain at least one position")
+                if len(row["teacher_topk_ids"][0]) != top_k:
+                    raise ValueError("All teacher references must use the same top-k")
+                batch["teacher_mask"][row_index, :count] = True
+                for key, dtype in (
+                    ("teacher_logit_indices", torch.long),
+                    ("teacher_topk_ids", torch.long),
+                    ("teacher_topk_logp", torch.float32),
+                    ("teacher_residual_log_mass", torch.float32),
+                    ("teacher_target_ids", torch.long),
+                    ("teacher_margin", torch.float32),
+                ):
+                    batch[key][row_index, :count] = torch.tensor(row[key], dtype=dtype)
+            extra_keys -= teacher_keys
+        retention_keys = {
+            "retention_logit_indices",
+            "retention_topk_ids",
+            "retention_topk_logp",
+            "retention_residual_log_mass",
+        }
+        if extra_keys & retention_keys:
+            import torch
+
+            if not retention_keys.issubset(extra_keys):
+                raise ValueError("Incomplete previous-checkpoint retention inputs in batch")
+            row_inputs = [ex.extra_inputs or {} for ex in examples]
+            max_positions = max(len(row["retention_logit_indices"]) for row in row_inputs)
+            top_k = len(row_inputs[0]["retention_topk_ids"][0])
+            batch["retention_mask"] = torch.zeros(
+                (len(examples), max_positions), dtype=torch.bool
+            )
+            batch["retention_logit_indices"] = torch.full(
+                (len(examples), max_positions), -1, dtype=torch.long
+            )
+            batch["retention_topk_ids"] = torch.zeros(
+                (len(examples), max_positions, top_k), dtype=torch.long
+            )
+            batch["retention_topk_logp"] = torch.zeros(
+                (len(examples), max_positions, top_k), dtype=torch.float32
+            )
+            batch["retention_residual_log_mass"] = torch.zeros(
+                (len(examples), max_positions), dtype=torch.float32
+            )
+            for row_index, row in enumerate(row_inputs):
+                count = len(row["retention_logit_indices"])
+                if count <= 0:
+                    raise ValueError("Every retention batch row must contain positions")
+                if len(row["retention_topk_ids"][0]) != top_k:
+                    raise ValueError("All retention references must use the same top-k")
+                batch["retention_mask"][row_index, :count] = True
+                for key, dtype in (
+                    ("retention_logit_indices", torch.long),
+                    ("retention_topk_ids", torch.long),
+                    ("retention_topk_logp", torch.float32),
+                    ("retention_residual_log_mass", torch.float32),
+                ):
+                    batch[key][row_index, :count] = torch.tensor(row[key], dtype=dtype)
+            extra_keys -= retention_keys
         for key in extra_keys:
             values = [(ex.extra_inputs or {}).get(key) for ex in examples]
             values = [value for value in values if value is not None]

@@ -7,6 +7,7 @@ import datetime
 import json
 import os
 import sys
+from typing import Any
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
@@ -14,6 +15,26 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 _OPENAI_DEFAULT_MODEL_SENTINELS = {"gpt-5.4", "gpt-5.5"}
+
+_SECRET_KEY_FRAGMENTS = ("api_key", "password", "secret", "access_token")
+
+
+def _redact_secrets(value: Any) -> Any:
+    """Return a JSON-safe copy with credential-like mapping values redacted."""
+    if isinstance(value, dict):
+        redacted: dict[Any, Any] = {}
+        for key, item in value.items():
+            key_text = str(key).lower()
+            if any(fragment in key_text for fragment in _SECRET_KEY_FRAGMENTS):
+                redacted[key] = "<redacted>" if item else item
+            else:
+                redacted[key] = _redact_secrets(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_secrets(item) for item in value]
+    if isinstance(value, tuple):
+        return [_redact_secrets(item) for item in value]
+    return value
 
 
 def parse_args() -> argparse.Namespace:
@@ -196,12 +217,14 @@ def main() -> None:
         _configure_rollout_model(flat_cfg, args.cfg_options)
     with open(os.path.join(flat_cfg["out_root"], "config.json"), "w", encoding="utf-8") as f:
         json.dump(
-            {
-                "runtime": flat_cfg,
-                "soft_prefix": soft_prefix_cfg,
-                "lora": lora_cfg,
-                "training_method": training_method,
-            },
+            _redact_secrets(
+                {
+                    "runtime": flat_cfg,
+                    "soft_prefix": soft_prefix_cfg,
+                    "lora": lora_cfg,
+                    "training_method": training_method,
+                }
+            ),
             f,
             ensure_ascii=False,
             indent=2,
