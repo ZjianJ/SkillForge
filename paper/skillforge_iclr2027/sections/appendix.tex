@@ -1,0 +1,227 @@
+\section{Reproducibility Details}
+\label{app:repro}
+
+\subsection{Artifact map}
+The source repository is organized around executable configurations rather than notebook-only experiments.  The primary entry points are:
+\begin{itemize}
+    \item \texttt{scripts/analyze\_selective\_distillation\_tokens.py}: two-pass teacher-forced scoring, exact JS, positive/Combined ranking, Top-64 caches, and concentration statistics;
+    \item \texttt{scripts/prepare\_spreadsheetbench\_selective\_stage2.py}: matched core, random, window, coverage, and preservation manifests;
+    \item \texttt{scripts/train\_soft\_prefix.py}: frozen-model prefix training and free-generation validation/test evaluation;
+    \item \texttt{skillopt/softprefix/model.py}: masked selected-token CE and Top-$k$-plus-residual reference-to-prefix KL;
+    \item \texttt{configs/spreadsheetbench/selective\_distillation\_stage1.yaml} and \texttt{selective\_distillation\_stage2.yaml}: main configurations;
+    \item \texttt{docs/experiment\_results\_overview.md}: result provenance and command index.
+\end{itemize}
+API keys are loaded from local configuration and are intentionally excluded from the artifact.  Cached successful trajectory text is sufficient for the reported compression runs; regeneration is not required.
+
+\subsection{Dataset construction and leakage controls}
+The split contains 400 Verified tasks: 80 training, 40 validation, and 280 test.  The one-trajectory teacher cache is generated only for training tasks.  Execution succeeds on 61 tasks, and only those verified trajectories enter stage 1.  Locator thresholds are computed within training trajectories.  The 40-task validation set chooses among selectors and losses.  For the final test, the Combined checkpoint is frozen and hashed before generation.  The task-specific oracle reads only the 61 training tasks and records \texttt{test\_split\_accessed=false}.  PRCB-v4-ES further splits the 61 successful trajectories into 49 optimization and 12 teacher-forced monitoring trajectories; the monitor never backpropagates and validation execution is not used for early stopping.
+
+\subsection{Optimization details}
+The shared prefix has shape $8\times 2048$.  It is initialized with the embedding rows of the first eight tokens of the full hard skill.  Training uses learning rate $10^{-3}$, batch size 1, two gradient-accumulation steps, seed 1, BF16 model computation, and gradient checkpointing.  The main Combined run uses one epoch; its recorded total loss is 2.74714, consisting of selected CE 2.74054 and preservation KL 0.006605.  The wall-clock training time was 1,152.3 seconds in the recorded environment.  Generation is greedy.  Formal test runs use batch size 2 and \texttt{max\_new\_tokens=8192}; an earlier Positive diagnostic used batch size 8 and 4,096 tokens and is excluded from matched primary comparisons.
+
+\subsection{Top-64-plus-residual KL}
+For reference distribution $r$ and student $p$, let $K$ be the 64 highest-probability reference token IDs.  The cached categorical distribution is
+\begin{equation}
+\tilde r = \big(r(v_1),\ldots,r(v_{64}),1-\sum_{v\in K}r(v)\big).
+\end{equation}
+At training time the student probabilities on the same IDs and its complementary mass form $\tilde p$.  We compute $\mathrm{KL}(\tilde r\Vert\tilde p)$.  Mean cached mass is 99.859\% for hard-skill and 99.829\% for no-skill distributions, so the residual bucket is small but not discarded.
+
+\section{Algorithm}
+\label{app:algorithm}
+
+\begin{figure}[h]
+\small
+\begin{minipage}{0.96\linewidth}
+\textbf{Algorithm 1: Combined selective behavioral compression}
+\begin{enumerate}
+    \item For each successful $(x,\skill,y_{1:T})$, tokenize the target once.
+    \item For each position $t$, run the frozen model on $(\skill,x,y_{<t})$ and $(x,y_{<t})$; compute $g_t$ by Eq.~\ref{eq:gain}, exact $j_t$ by Eq.~\ref{eq:js}, and $c_t=g_tj_t$.
+    \item Select the top $\rho T$ eligible positions by $c_t$ as $C$; always include EOS.  Sample a same-budget set $U$ from positions outside the selectors being compared.
+    \item Cache no-skill Top-64 token IDs, their log probabilities, and residual log mass for $U$.
+    \item Initialize $\prefix_\phi$ from the first $L$ hard-skill token embeddings.  Freeze $\theta$.
+    \item Minimize Eq.~\ref{eq:loss} over $\phi$ only.  Select the checkpoint on validation tasks, freeze it, and evaluate by task-conditioned free generation and workbook execution.
+\end{enumerate}
+\end{minipage}
+\end{figure}
+
+\section{Complete Locator Statistics}
+\label{app:locator}
+
+\begin{table}[h]
+\caption{Positive-gain concentration across 61 successful training trajectories.  ``Aggregate'' pools gain mass; ``trajectory mean'' averages per-trajectory capture.}
+\centering
+\small
+\begin{tabular}{rrrr}
+\toprule
+Top budget & Aggregate & Trajectory mean & Random \\
+\midrule
+1\%  & 42.11\% & 41.97\% & 0.99\% \\
+2\%  & 59.72\% & 59.13\% & 1.99\% \\
+5\%  & 84.05\% & 82.99\% & 4.99\% \\
+10\% & 96.12\% & 95.42\% & 9.97\% \\
+20\% & 99.76\% & 99.62\% & 19.84\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\caption{Top-5\% locator comparison.  Each selector has the same position budget.}
+\centering
+\small
+\begin{tabular}{lrrr}
+\toprule
+Selector & Positive-gain mass & JS mass & Combined-score mass \\
+\midrule
+Positive gain & 81.91\% & 44.69\% & 95.90\% \\
+Combined & 76.23\% & 50.61\% & 97.56\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\clearpage
+\section{Complete SpreadsheetBench Results}
+\label{app:results}
+
+\subsection{Early and selective stage-2 runs}
+
+\begin{table}[h]
+\caption{Completed shared-prefix validation runs.  Results with different epochs or preservation sampling should not be treated as single-factor comparisons.}
+\centering
+\scriptsize
+\begin{tabular}{lrrrr}
+\toprule
+Variant & CE positions & Preserve & Epoch & Success \\
+\midrule
+Full CE & 54,990 & 0 & 3 & 11/40 \\
+Random-5 core & 2,838 & 0 & 3 & 15/40 \\
+Positive-5 core & 2,838 & 0 & 2/3 & 13/40 (incomplete) \\
+Random-5 core + independent KL & 2,838 & 2,777 & 1 & 15/40 \\
+Positive-5 core + independent KL & 2,838 & 2,777 & 1 & 18/40 \\
+Positive L2/R8 + independent KL & 19,424 & 2,777 & 1 & 12/40 \\
+Positive-5 core + shared KL & 2,838 & 2,777 & 1 & 10/40 \\
+Combined-5 core + shared KL & 2,838 & 2,777 & 1 & 16/40 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\FloatBarrier
+\subsection{PRCB variants}
+
+\begin{table}[h]
+\caption{Residual/block prefix experiments on the 40-task validation split.  Window indices denote trained prefix rows.}
+\centering
+\scriptsize
+\begin{tabular}{p{3.2cm}p{6.7cm}rr}
+\toprule
+Variant & Schedule or defining change & Steps & Success \\
+\midrule
+Warm Combined & Starting checkpoint & -- & 16/40 \\
+PRCB-v1 & Gradient-probed row pairs & 32 total & 14/40 \\
+PRCB-v2 tail-to-head & $67\!\rightarrow\!45\!\rightarrow\!23\!\rightarrow\!01$ & 32 total & 11/40 \\
+PRCB-v2 head-to-tail & $01\!\rightarrow\!23\!\rightarrow\!45\!\rightarrow\!67$ & 32 total & 15/40 \\
+PRCB-v3 & Gold-context residual locator + margin & 32 total & 16/40 \\
+PRCB-v4 & Overlap $01\!\rightarrow\!12\!\rightarrow\!\cdots\!\rightarrow\!67$ & 32 total & 16/40 \\
+PRCB-v4-ES (width 2) & 49 train/12 monitor, rollback & 104 total & 14/40 \\
+PRCB-v4-ES (width 5) & complete $01234,12345,23456,34567$ & 46 total & 13/40 \\
+PRCB-v5 & replay/retention + coefficient line search & 74 total & \textbf{18/40} \\
+PRCB-v6 & independent full-length functional learners & 28 total & 16/40 \\
+PRCB-v6 low-rank & rank 2; 4,112/16,384 learner parameters & 18 total & 16/40 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\FloatBarrier
+In PRCB-v6, stage 1 improves global Skill-KL by 2.80\% and is accepted with $\alpha_1=0.5$.  Stage 2 is rejected with $\alpha_2=0$.  Its new core overlaps 2,568 of 2,777 previous positions (92.47\%).  The undistilled ensemble and the student distilled back to one prefix both solve 16/40, so final prefix distillation is not the primary failure.
+
+\subsection{Paired test details}
+
+For Combined versus full-trajectory SoftSkill, the net gain is 16 tasks and the exact McNemar $p$-value is .0479.  For Combined versus No Skill, 40 tasks are Combined-only and 36 are No-Skill-only, giving $p=.731$.  For PRCB-v5 versus SoftSkill, the exact paired $p$-value is .169.  These values are computed from per-task execution verdicts, not from unpaired proportions.
+
+\subsection{Task-specific oracle}
+
+\begin{table}[h]
+\caption{Same-task oracle on the 61 successful training tasks.  Each row trains a separate length-8 prefix for 32 optimizer steps and evaluates it by free generation on its own task.  These numbers are not held-out generalization.}
+\centering
+\small
+\begin{tabular}{lrrr}
+\toprule
+Condition & Success & Rate & Mean core Skill-KL closure \\
+\midrule
+No Skill & 26/61 & 42.62\% & -- \\
+Hard Skill & 32/61 & 52.46\% & -- \\
+Combined core-only 5\% & 28/61 & 45.90\% & 62.18\% \\
+Combined core-only 10\% & \textbf{35/61} & \textbf{57.38\%} & 56.86\% \\
+Combined core-only 20\% & 33/61 & 54.10\% & 50.74\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The closure metric is
+\begin{equation}
+\mathrm{closure}=1-
+\frac{\mathrm{KL}(q_t\Vert p_t^\phi)}{\mathrm{KL}(q_t\Vert b_t)},
+\end{equation}
+averaged over selected core states.  A value of 57\% means that the prefix closes 57\% of the hard-skill/no-skill KL gap on cached gold contexts; it is not an execution-success percentage.  The fact that 5\% obtains higher closure than 10\% while solving fewer tasks is direct evidence that this local metric is misaligned with rollout success.
+
+\section{SearchQA Reproduction Check}
+\label{app:searchqa}
+
+Before SpreadsheetBench, we reproduced the inherited SearchQA pipeline with Qwen3.5-4B and a length-32 prefix.  For the best soft-prefix checkpoint, the repository's two evaluation metrics (named ``hard'' and ``soft'' scoring, not hard-prompt and soft-prompt conditions) are 76.56\% and 82.45\% on the 64-example validation set, and 77.14\% and 84.33\% on the 1,400-example test set.  Training loss decreases from 0.3103 to 0.2286 to 0.1951 over three epochs.  SearchQA outputs are predominantly short answers, so this check verifies the basic compression chain but not long-horizon agent execution.
+
+\section{Command Templates}
+\label{app:commands}
+
+The following commands are written relative to the repository root.  Paths to the local model cache may be overridden through the YAML files or command-line configuration.
+
+\paragraph{Stage-1 locator.}
+\begin{verbatim}
+python -u scripts/analyze_selective_distillation_tokens.py \
+  --config configs/spreadsheetbench/selective_distillation_stage1.yaml
+\end{verbatim}
+
+\paragraph{Prepare selective manifests.}
+\begin{verbatim}
+python -u scripts/prepare_spreadsheetbench_selective_stage2.py \
+  --stage1-root outputs/SpreadsheetBench_selective_stage1_qwen36_gpt55 \
+  --out-dir outputs/SpreadsheetBench_selective_stage2_manifests \
+  --seed 1
+\end{verbatim}
+
+\paragraph{Train the Combined shared-preservation prefix.}
+\begin{verbatim}
+CUDA_VISIBLE_DEVICES=0 python -u scripts/train_soft_prefix.py \
+  --config configs/spreadsheetbench/selective_distillation_stage2.yaml \
+  --out_root outputs/SpreadsheetBench_combined_train \
+  --cfg-options \
+    train.num_epochs=1 \
+    soft_prefix.trajectory_examples_path=\
+outputs/SpreadsheetBench_selective_stage2_manifests/\
+combined_top0.05_core_shared_preserve.jsonl \
+    soft_prefix.preservation_loss_weight=1.0 \
+    evaluation.sel_env_num=40 \
+    evaluation.test_env_num=0 \
+    evaluation.eval_test=false
+\end{verbatim}
+
+\paragraph{Frozen 280-task evaluation.}
+\begin{verbatim}
+CUDA_VISIBLE_DEVICES=0 python -u scripts/train_soft_prefix.py \
+  --config configs/spreadsheetbench/selective_distillation_stage2.yaml \
+  --out_root outputs/SpreadsheetBench_combined_test280 \
+  --cfg-options \
+    train.num_epochs=0 \
+    evaluation.sel_env_num=0 \
+    evaluation.test_env_num=0 \
+    evaluation.eval_test=true \
+    env.checkpoint_eval_val=false \
+    env.generation_batch_size=2 \
+    soft_prefix.max_new_tokens=8192 \
+    soft_prefix.checkpoint_path=/ABSOLUTE/PATH/best_prefix.pt
+\end{verbatim}
+
+The checkpoint checksum and exact output directory should be fixed before running the last command.  The repository documentation contains the hashes used for completed formal runs.
+
+\section{Pre-Submission Experiment Checklist}
+\label{app:todo}
+
+This draft is complete as an account of the current repository, but a competitive final submission should add: (i) at least three training seeds for the main locator and preservation baselines; (ii) a second agent benchmark with executable or environment-based scoring; (iii) a matched hard-skill test run; (iv) a direct selected-position Skill-KL target ablation against selected hard CE; (v) on-policy student-state distillation; (vi) compute, peak-memory, and prefix-inference latency measurements; (vii) bootstrap confidence intervals over tasks; and (viii) qualitative program traces showing where Combined fixes or breaks the baseline.  These are intentionally listed rather than silently implied by the existing evidence.

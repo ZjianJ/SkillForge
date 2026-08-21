@@ -125,6 +125,7 @@ class SoftPrefixSettings:
     model_name: str
     architecture: str = "auto"
     prefix_length: int = 32
+    prefix_parameter_dtype: str = "model"
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
     max_prompt_tokens: int = 2048
@@ -175,6 +176,7 @@ class SoftPrefixSettings:
             model_name=str(cfg["model_name"]),
             architecture=str(cfg.get("architecture", "auto")),
             prefix_length=_parse_prefix_length(cfg.get("prefix_length", 32)),
+            prefix_parameter_dtype=str(cfg.get("prefix_parameter_dtype", "model")),
             learning_rate=float(cfg.get("learning_rate", 1e-3)),
             weight_decay=float(cfg.get("weight_decay", 0.0)),
             max_prompt_tokens=int(cfg.get("max_prompt_tokens", 2048)),
@@ -2696,6 +2698,7 @@ def _build_prefix_model(env: str, settings: SoftPrefixSettings, init_text: str) 
         prefix_length=settings.prefix_length,
         init_text=init_text,
         init_strategy=settings.init_strategy,
+        prefix_parameter_dtype=settings.prefix_parameter_dtype,
         torch_dtype=settings.torch_dtype,
         device=settings.device,
         trust_remote_code=settings.trust_remote_code,

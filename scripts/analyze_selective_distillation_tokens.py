@@ -13,7 +13,6 @@ import hashlib
 import json
 import math
 import os
-import random
 import sys
 import time
 from pathlib import Path
@@ -198,6 +197,8 @@ def _score_logits(
     clean_top_ids = np.empty((n_tokens, top_k), dtype=np.int32)
     clean_top_logp = np.empty((n_tokens, top_k), dtype=np.float16)
     clean_residual_log_mass = np.empty(n_tokens, dtype=np.float16)
+    skill_entropy = np.empty(n_tokens, dtype=np.float32)
+    clean_entropy = np.empty(n_tokens, dtype=np.float32)
 
     for start in range(0, n_tokens, chunk_size):
         end = min(start + chunk_size, n_tokens)
@@ -209,6 +210,12 @@ def _score_logits(
         skill_logp[start:end] = s_target.cpu().numpy()
         clean_logp[start:end] = c_target.cpu().numpy()
         gain[start:end] = (s_target - c_target).cpu().numpy()
+        skill_entropy[start:end] = (
+            -(skill_lp.exp() * skill_lp).sum(dim=-1)
+        ).cpu().numpy()
+        clean_entropy[start:end] = (
+            -(clean_lp.exp() * clean_lp).sum(dim=-1)
+        ).cpu().numpy()
 
         values, indices = torch.topk(skill_lp, k=top_k, dim=-1)
         top_ids[start:end] = indices.cpu().numpy().astype(np.int32)
@@ -242,6 +249,9 @@ def _score_logits(
         "positive_gain": positive,
         "js": js,
         "combined": combined,
+        "skill_entropy": skill_entropy,
+        "clean_entropy": clean_entropy,
+        "entropy_reduction": (clean_entropy - skill_entropy).astype(np.float32),
         "skill_topk_ids": top_ids,
         "skill_topk_logp": top_logp,
         "skill_residual_log_mass": residual_log_mass,
@@ -524,7 +534,7 @@ def _aggregate(
         f"- 正 Skill 增益 token：{total_positive} ({total_positive / total_tokens:.2%})",
         f"- 平均轨迹 C(10%)：{q10:.4f}，95% bootstrap CI [{ci['0.1000'][0]:.4f}, {ci['0.1000'][1]:.4f}]",
         f"- 平均轨迹 C(20%)：{q20:.4f}，95% bootstrap CI [{ci['0.2000'][0]:.4f}, {ci['0.2000'][1]:.4f}]",
-        f"- 预注册判据：C(10%) ≥ 0.60 且 C(20%) ≥ 0.80",
+        "- 预注册判据：C(10%) ≥ 0.60 且 C(20%) ≥ 0.80",
         f"- 单轨迹同时达标比例：{support_by_trajectory['both_fraction']:.2%}",
         f"- Top 5% positive-gain core 经 L2/R8 扩窗后平均覆盖：{window_statistics['positive_gain']['0.0500']['mean_window_fraction']:.2%}",
         f"- Top 10% positive-gain core 经 L2/R8 扩窗后平均覆盖：{window_statistics['positive_gain']['0.1000']['mean_window_fraction']:.2%}",

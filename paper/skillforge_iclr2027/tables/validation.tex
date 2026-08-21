@@ -1,0 +1,19 @@
+\begin{table*}[t]
+\caption{SpreadsheetBench validation ablations (40 tasks).  ``Shared'' means Positive and Combined use the identical matched preservation indices.  Runs marked incomplete are excluded.}
+\label{tab:validation}
+\centering
+\small
+\begin{tabular}{lrrrrl}
+\toprule
+Training target & CE tokens & Coverage & Preserve & Epochs & Solved \\
+\midrule
+Full trajectory & 54,990 & 100.00\% & -- & 3 & 11/40 (27.5\%) \\
+Random-5\% & 2,838 & 5.06\% & -- & 3 & 15/40 (37.5\%) \\
+Random-5\% + KL & 2,838 & 5.06\% & 2,777 & 1 & 15/40 (37.5\%) \\
+Positive-5\% + KL & 2,838 & 5.06\% & 2,777 & 1 & \textbf{18/40 (45.0\%)} \\
+Positive-5\% + shared KL & 2,838 & 5.06\% & 2,777 & 1 & 10/40 (25.0\%) \\
+Combined-5\% + shared KL & 2,838 & 5.06\% & 2,777 & 1 & 16/40 (40.0\%) \\
+Positive window L2/R8 + KL & 19,424 & 35.25\% & 2,777 & 1 & 12/40 (30.0\%) \\
+\bottomrule
+\end{tabular}
+\end{table*}

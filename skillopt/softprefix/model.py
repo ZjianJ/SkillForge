@@ -135,6 +135,7 @@ class SoftPrefixCausalLM:
         prefix_length: int,
         init_text: str = "",
         init_strategy: str = "text",
+        prefix_parameter_dtype: str = "model",
         torch_dtype: str = "auto",
         device: str = "auto",
         trust_remote_code: bool = False,
@@ -179,8 +180,15 @@ class SoftPrefixCausalLM:
         self.device = self.model.get_input_embeddings().weight.device
         self.prefix_length = int(prefix_length)
         hidden_size = self.model.get_input_embeddings().embedding_dim
+        normalized_prefix_dtype = str(prefix_parameter_dtype or "model").strip().lower()
+        if normalized_prefix_dtype in {"", "model", "auto", "same"}:
+            prefix_dtype = self.model.dtype
+        elif normalized_prefix_dtype in {"float32", "fp32"}:
+            prefix_dtype = torch.float32
+        else:
+            raise ValueError("soft_prefix.prefix_parameter_dtype must be model or float32")
         self.prefix_embeddings = torch.nn.Parameter(
-            torch.empty(self.prefix_length, hidden_size, device=self.device, dtype=self.model.dtype)
+            torch.empty(self.prefix_length, hidden_size, device=self.device, dtype=prefix_dtype)
         )
         torch.nn.init.normal_(self.prefix_embeddings, mean=0.0, std=0.02)
         init_strategy = init_strategy.strip().lower()
@@ -224,10 +232,25 @@ class SoftPrefixCausalLM:
             tiled = token_embeds.repeat((repeats, 1))[: self.prefix_length]
             self.prefix_embeddings.copy_(tiled)
 
-    def _with_prefix(self, input_ids, attention_mask, labels=None, prefix_insert_idx=None):
+    def _with_prefix(
+        self,
+        input_ids,
+        attention_mask,
+        labels=None,
+        prefix_insert_idx=None,
+        prefix_embeddings_override=None,
+    ):
         batch_size = input_ids.shape[0]
         token_embeds = self.model.get_input_embeddings()(input_ids.to(self.device))
-        prefix = self.prefix_embeddings.unsqueeze(0).expand(batch_size, -1, -1)
+        # A FP32 master prefix materially improves small-gradient and
+        # finite-difference experiments.  The cast keeps the frozen backbone
+        # in its original dtype while autograd accumulates FP32 prefix grads.
+        prefix_source = (
+            self.prefix_embeddings
+            if prefix_embeddings_override is None
+            else prefix_embeddings_override
+        )
+        prefix = prefix_source.to(dtype=token_embeds.dtype).unsqueeze(0).expand(batch_size, -1, -1)
         attention_mask = attention_mask.to(self.device)
         labels_on_device = labels.to(self.device) if labels is not None else None
         prefix_mask = self.torch.ones(
@@ -495,6 +518,7 @@ class SoftPrefixVisionLM:
         prefix_length: int,
         init_text: str = "",
         init_strategy: str = "text",
+        prefix_parameter_dtype: str = "model",
         torch_dtype: str = "auto",
         device: str = "auto",
         trust_remote_code: bool = False,
@@ -540,8 +564,15 @@ class SoftPrefixVisionLM:
         self.device = self.model.get_input_embeddings().weight.device
         self.prefix_length = int(prefix_length)
         hidden_size = self.model.get_input_embeddings().embedding_dim
+        normalized_prefix_dtype = str(prefix_parameter_dtype or "model").strip().lower()
+        if normalized_prefix_dtype in {"", "model", "auto", "same"}:
+            prefix_dtype = self.model.dtype
+        elif normalized_prefix_dtype in {"float32", "fp32"}:
+            prefix_dtype = torch.float32
+        else:
+            raise ValueError("soft_prefix.prefix_parameter_dtype must be model or float32")
         self.prefix_embeddings = torch.nn.Parameter(
-            torch.empty(self.prefix_length, hidden_size, device=self.device, dtype=self.model.dtype)
+            torch.empty(self.prefix_length, hidden_size, device=self.device, dtype=prefix_dtype)
         )
         torch.nn.init.normal_(self.prefix_embeddings, mean=0.0, std=0.02)
         init_strategy = init_strategy.strip().lower()
@@ -668,7 +699,7 @@ class SoftPrefixVisionLM:
         )
         return position_ids, full_mm_token_type_ids
 
-    def _with_prefix(self, batch: dict, labels=None):
+    def _with_prefix(self, batch: dict, labels=None, prefix_embeddings_override=None):
         input_ids = batch["input_ids"]
         attention_mask = batch["attention_mask"]
         batch_size = input_ids.shape[0]
@@ -677,7 +708,12 @@ class SoftPrefixVisionLM:
             token_embeds = self.model.get_input_embeddings()(input_ids.to(self.device))
         else:
             token_embeds = self._embed_with_vision(batch)
-        prefix = self.prefix_embeddings.unsqueeze(0).expand(batch_size, -1, -1)
+        prefix_source = (
+            self.prefix_embeddings
+            if prefix_embeddings_override is None
+            else prefix_embeddings_override
+        )
+        prefix = prefix_source.to(dtype=token_embeds.dtype).unsqueeze(0).expand(batch_size, -1, -1)
         inputs_embeds = self.torch.cat([prefix, token_embeds], dim=1)
         prefix_mask = self.torch.ones(
             batch_size,

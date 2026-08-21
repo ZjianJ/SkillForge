@@ -1,0 +1,32 @@
+_base_: dynamic_combined_full_vocab_skillkl.yaml
+
+# Dynamic Additive Skill experiment requested after Dynamic Combined v1.
+# Keep the same Train61, length-8 prefix, Top-10% core budget, full-vocabulary
+# hard-Skill KL, EOS CE, optimizer schedule, and fixed preservation loss.
+# Change only the locator and disable preservation-triggered stop/rollback.
+evaluation:
+  sel_env_num: 40
+  test_env_num: 0
+  eval_test: false
+
+env:
+  generation_batch_size: 8
+  checkpoint_eval_val: false
+
+dynamic_combined:
+  locator_method: additive_skill
+  additive_alpha: 0.5
+  core_ratio: 0.10
+
+  # Additive scores are min-max normalized independently in every trajectory,
+  # so their summed mass is not comparable across relocation rounds. Use the
+  # unnormalized full-vocabulary teacher/student KL mass for stopping and
+  # checkpoint selection.
+  stop_mass_metric: full_vocab_kl
+
+  # The preservation KL remains in the training objective with weight 1.0 and
+  # is fully logged, but it cannot stop or roll back this experiment.
+  preservation_loss_weight: 1.0
+  preservation_guard_enabled: false
+
+  eval_after_train: true

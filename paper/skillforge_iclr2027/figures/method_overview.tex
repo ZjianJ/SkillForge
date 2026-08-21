@@ -1,0 +1,26 @@
+\begin{figure*}[t]
+\centering
+\begin{tikzpicture}[
+  font=\footnotesize,
+  node distance=6mm and 3mm,
+  box/.style={draw,rounded corners=2pt,align=center,minimum height=10mm,inner sep=2.5pt},
+  arr/.style={-{Latex[length=2mm]},thick},
+  teacher/.style={box,fill=skillblue!8,draw=skillblue},
+  student/.style={box,fill=skillgreen!8,draw=skillgreen},
+  score/.style={box,fill=skillorange!8,draw=skillorange}
+]
+\node[box,text width=21mm] (data) {task $x$ + successful trajectory $y_{1:T}$};
+\node[teacher,right=of data,text width=43mm] (paired) {same frozen LM, identical gold context\\hard skill: $q_t=p_\theta(\cdot\mid \skill,x,y_{<t})$\\no skill: $b_t=p_\theta(\cdot\mid x,y_{<t})$};
+\node[score,right=of paired,text width=33mm] (locator) {behavioral-delta locator\\$g_t=[\log q_t(y_t)-\log b_t(y_t)]_+$\\$c_t=g_t\,\mathrm{JS}(q_t,b_t)$};
+\node[score,right=of locator,text width=21mm] (select) {top-$\rho$ core $C$\\matched preserve set $U$};
+\node[student,below=of locator,xshift=-13mm,text width=51mm] (train) {freeze $\theta$; train only $\prefix\in\mathbb{R}^{L\times d}$\\$\mathcal{L}_{\rm CE}(C)+\lambda\mathcal{L}_{\rm preserve}(U)$};
+\node[student,right=of train,text width=30mm] (eval) {soft prefix + task\\free generation\\execution score};
+\draw[arr] (data) -- (paired);
+\draw[arr] (paired) -- (locator);
+\draw[arr] (locator) -- (select);
+\draw[arr] (select.south) |- (train.north);
+\draw[arr] (train) -- (eval);
+\end{tikzpicture}
+\caption{\method separates \emph{where the hard skill changes behavior} from \emph{what the soft prefix must learn}.  The full-vocabulary distributions are used to locate a sparse core; current main training uses hard next-token targets on that core and a no-skill Top-64-plus-residual KL on unselected positions.  Only the soft-prefix embeddings are updated.}
+\label{fig:overview}
+\end{figure*}

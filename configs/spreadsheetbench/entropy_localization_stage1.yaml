@@ -1,0 +1,32 @@
+model:
+  name: Qwen/Qwen3.6-35B-A3B
+  revision: 995ad96eacd98c81ed38be0c5b274b04031597b0
+  dtype: bfloat16
+  device: cuda
+  trust_remote_code: false
+
+data:
+  examples_path: outputs/SoftSkill_spreadsheetbench_paper_len8_seed1_single_gpu/trajectory_sft/examples.jsonl
+  skill_path: ckpt/spreadsheetbench/gpt5.5_skill.md
+  max_prompt_tokens: 16384
+  max_target_tokens: 8192
+
+scoring:
+  exact_js: true
+  top_k: 64
+  score_chunk_size: 8
+
+selection:
+  # The legacy Stage-1 reporter has preregistered C(10%)/C(20%) checks, so
+  # retain those analysis points even though this experiment trains at 5%.
+  ratios: [0.05, 0.10, 0.20]
+  training_ratios: [0.05, 0.10, 0.20]
+  score_names: [positive_gain, combined]
+  window_left: 0
+  window_right: 0
+  bootstrap_samples: 1000
+  random_trials: 100
+  seed: 1
+
+output:
+  out_root: outputs/SpreadsheetBench_entropy_localization_stage1

@@ -1,0 +1,62 @@
+\section{Selective Behavioral Compression}
+\label{sec:method}
+
+\subsection{Problem setup}
+Let $p_\theta$ be a frozen causal language model, $x$ an agent task, $\skill$ a textual skill, and $\traj=(y_1,\ldots,y_T)$ a successful trajectory.  We seek a soft prefix $\prefix_\phi\in\mathbb{R}^{L\times d}$ such that the frozen model conditioned on $(\prefix_\phi,x)$ reproduces the useful behavior of conditioning on $(\skill,x)$, without storing the hard skill in the inference context.  Only $Ld$ parameters are trainable.
+
+For every target position we use the same teacher-forced state $(x,y_{<t})$ and compute
+\begin{align}
+q_t(v)&=p_\theta(v\mid \skill,x,y_{<t}), &
+b_t(v)&=p_\theta(v\mid x,y_{<t}), \label{eq:teachers}\\
+p^\phi_t(v)&=p_\theta(v\mid \prefix_\phi,x,y_{<t}).
+\end{align}
+The alignment is by construction: both distributions in Equation~\ref{eq:teachers} predict the next token of the \emph{same} tokenized successful trajectory.  Comparing independent generations would confound skill influence with divergent histories.
+
+\subsection{Locating the behavioral delta}
+We use two complementary signals.  The first is realized positive gain,
+\begin{equation}
+g_t=\left[\log q_t(y_t)-\log b_t(y_t)\right]_+,
+\label{eq:gain}
+\end{equation}
+which asks whether the hard skill makes the gold next token more likely.  It is directional and trajectory-specific, but ignores redistributions among non-gold tokens.  The second is the full-distribution Jensen--Shannon divergence
+\begin{equation}
+j_t=\tfrac12\mathrm{KL}(q_t\Vert m_t)+\tfrac12\mathrm{KL}(b_t\Vert m_t),\qquad
+m_t=\tfrac12(q_t+b_t).
+\label{eq:js}
+\end{equation}
+Our Combined locator is
+\begin{equation}
+c_t=g_t\,j_t. \label{eq:combined}
+\end{equation}
+Multiplication favors states where the skill both moves the complete distribution and moves it in the direction realized by a successful trajectory.  For each trajectory, we select the highest-scoring $\rho$ fraction of eligible non-EOS tokens as core $C$; EOS is always supervised.  Stage-1 scoring uses exact full-vocabulary JS.  Top-64 probabilities and one residual-mass bucket are cached for later KL losses; they retain over 99.8\% probability mass on average in our data.
+
+We diagnose sparsity by the concentration curve
+\begin{equation}
+\mathcal{C}(\rho)=\frac{\sum_{t\in\mathrm{Top}_\rho(g)}g_t}{\sum_{t=1}^T g_t}.
+\end{equation}
+High $\mathcal{C}(\rho)$ at small $\rho$ is a necessary, not sufficient, condition for selective compression: it says that the teacher effect is sparse on gold contexts, but not that the prefix can cause the same states during generation.
+
+\subsection{Selective prefix objective}
+The main implementation uses the hard trajectory token at selected positions rather than a dense teacher-distribution target:
+\begin{equation}
+\mathcal{L}_{\mathrm{core}}(\phi)=-\frac{1}{|C|}\sum_{t\in C}\log p^\phi_t(y_t).
+\label{eq:core}
+\end{equation}
+Thus $q_t$ is used to discover \emph{where} supervision is attributable to the skill; the current main loss uses the successful token to specify \emph{what} to predict.  We reserve ``full Skill-KL'' for variants that explicitly optimize $\mathrm{KL}(q_t\Vert p_t^\phi)$.
+
+Selective CE alone can change predictions everywhere because every prefix embedding affects all later activations.  We sample a matched-size preservation set $U$ outside both selectors in a paired comparison and anchor it to the no-skill reference:
+\begin{equation}
+\mathcal{L}_{\mathrm{pres}}(\phi)=\frac{1}{|U|}\sum_{t\in U}\mathrm{KL}\!\left(\tilde b_t\Vert\tilde p^\phi_t\right),
+\label{eq:preserve}
+\end{equation}
+where $\tilde b_t$ and $\tilde p^\phi_t$ are categorical distributions over the 64 most probable reference tokens plus a single residual bucket.  The final loss is
+\begin{equation}
+\mathcal{L}=\mathcal{L}_{\mathrm{core}}+\lambda_{\mathrm{pres}}\mathcal{L}_{\mathrm{pres}},
+\qquad \lambda_{\mathrm{pres}}=1.
+\label{eq:loss}
+\end{equation}
+The prefix is initialized from the first $L$ token embeddings of the hard skill.  Base-model weights remain frozen throughout.
+
+\subsection{Residual prefix boosting variants}
+\label{sec:prcb}
+We also test whether prefix coordinates can act as weak learners.  PRCB-v1--v4 repeatedly optimize overlapping coordinate blocks; v4-ES selects per-block steps on a held-out subset of training trajectories.  PRCB-v5 adds replay/retention and line-searches a block coefficient.  PRCB-v6 moves closer to functional boosting~\citep{friedman2001greedy}: each stage trains an independent prefix learner against the residual between hard-skill and current ensemble logits, freezes previous learners, line-searches a scalar $\alpha_s$, and rejects stages without global Skill-KL improvement.  These are diagnostic variants rather than the main method; their failures clarify why coordinate blocking is not equivalent to independent functional weak learners.

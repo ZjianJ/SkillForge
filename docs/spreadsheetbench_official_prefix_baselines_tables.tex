@@ -1,0 +1,63 @@
+% Requires \usepackage{booktabs}.
+% Official-adapted SE-KD/OPCD results, frozen seed-1 Test280, 8192/batch2.
+
+\begin{table}[t]
+  \centering
+  \small
+  \caption{Matched SpreadsheetBench Test280 results. All learned methods use
+  the same frozen Qwen3.6-35B-A3B backbone and a length-8 soft prefix. SE-KD
+  and OPCD are official-objective adaptations, not reproductions of the
+  original papers' model-scale settings.}
+  \label{tab:official-prefix-test280}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    Method & Success & Cell & Sheet & Exec. fail & Semantic fail \\
+    \midrule
+    Original SoftSkill & 85/280 (30.36\%) & 45/193 & 40/87 & 42 & 153 \\
+    Plain Qwen & 97/280 (34.64\%) & 57/193 & 40/87 & 39 & 144 \\
+    Combined 5\% + shared KL & 101/280 (36.07\%) & 61/193 & 40/87 & 53 & 126 \\
+    \textbf{SE-KD-Prefix} & \textbf{113/280 (40.36\%)} & \textbf{69/193} & \textbf{44/87} & 43 & \textbf{124} \\
+    \textbf{OPCD-Prefix} & \textbf{107/280 (38.21\%)} & 65/193 & 42/87 & \textbf{31} & 142 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \centering
+  \small
+  \caption{Exact paired comparisons on the same 280 tasks. ``A only'' and
+  ``B only'' count discordant successes. Reported $p$ values are uncorrected,
+  two-sided exact binomial tests.}
+  \label{tab:official-prefix-paired}
+  \begin{tabular}{lrrr}
+    \toprule
+    Comparison (A vs. B) & A only & B only & Exact $p$ \\
+    \midrule
+    SE-KD vs. Original & 45 & 17 & \textbf{0.000497} \\
+    OPCD vs. Original & 39 & 17 & \textbf{0.004562} \\
+    SE-KD vs. Combined & 40 & 28 & 0.181810 \\
+    OPCD vs. Combined & 37 & 31 & 0.544612 \\
+    SE-KD vs. Plain & 38 & 22 & 0.051894 \\
+    OPCD vs. Plain & 28 & 18 & 0.183925 \\
+    SE-KD vs. OPCD & 32 & 26 & 0.511842 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \centering
+  \small
+  \caption{Generation length and efficiency under the matched Test280
+  protocol. Wall time excludes execution-based scoring.}
+  \label{tab:official-prefix-efficiency}
+  \begin{tabular}{lrrrr}
+    \toprule
+    Method & Mean tokens & Median & At 8192 cap & Generation time \\
+    \midrule
+    Combined & 754.4 & 507.5 & 5 & 3:01:52 \\
+    Plain Qwen & 792.9 & 610.5 & 2 & 3:55:11 \\
+    SE-KD-Prefix & 1237.8 & 780.0 & 9 & 5:55:18 \\
+    OPCD-Prefix & 867.4 & 591.0 & 4 & 4:05:31 \\
+    \bottomrule
+  \end{tabular}
+\end{table}

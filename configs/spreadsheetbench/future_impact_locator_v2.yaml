@@ -1,0 +1,62 @@
+_base_: combined_core10_full_vocab_skillkl_shared_preserve.yaml
+
+# FIL-v2 direct reliability gate.  This driver cannot access Val40/Test280.
+evaluation:
+  sel_env_num: 0
+  test_env_num: 0
+  eval_test: false
+
+env:
+  generation_batch_size: 8
+  checkpoint_eval_val: false
+
+soft_prefix:
+  prefix_length: 8
+  # FIL relies on small prefix gradients/directional perturbations.  Keep a
+  # FP32 master parameter and cast only at the frozen BF16 backbone boundary.
+  prefix_parameter_dtype: float32
+  max_new_tokens: 4096
+  checkpoint_path: ""
+
+future_impact:
+  partition_seed: 24018
+  source_trajectories: 39
+  outer_trajectories: 10
+  calibration_trajectories: 12
+
+  core_ratio: 0.10
+  positive_edge_only: true
+  kl_chunk_size: 8
+  preservation_loss_weight: 1.0
+  preservation_label_field: preserve_indices
+  exclude_preservation_from_core: true
+
+  # Adam-aware fixed metric estimated without updating the prefix.
+  moment_probe_trajectories: 8
+  adam_epsilon: 1.0e-8
+  moment_floor_fraction: 1.0e-3
+
+  # Qwen's default SDPA/grouped-MoE kernels do not expose forward AD.  FIL
+  # temporarily uses their algebraically equivalent eager implementations for
+  # JVP scoring, then validates ranking against reverse-mode gradients and
+  # restores the default kernels before actual optimization.
+  score_method: jvp_eager
+  jvp_oracle_path: outputs/SpreadsheetBench_fil_v2_jvp_chunked_maskfixed_diagnostic_fp32_len8_seed1/locator/jvp_oracle.json
+  jvp_backend_audit_trajectories: 6
+  jvp_repeat_trajectories: 2
+  jvp_attention_query_chunk_size: 256
+  min_backend_primal_spearman: 0.90
+  min_backend_primal_jaccard: 0.70
+  reuse_direction_if_present: true
+
+  # Legacy finite-difference fallback.  The FP32 master still enters the
+  # frozen backbone as BF16, so these perturbation checks remain mandatory if
+  # score_method is changed back to finite_difference.
+  finite_difference_epsilon: 0.125
+  stability_epsilon_factors: [0.5, 1.0, 2.0]
+  stability_trajectories: 6
+  min_stability_spearman: 0.80
+  min_stability_jaccard: 0.60
+
+  calibration_optimizer_steps: 4
+  calibration_accumulation: 2

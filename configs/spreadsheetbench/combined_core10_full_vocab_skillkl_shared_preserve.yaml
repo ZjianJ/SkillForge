@@ -1,0 +1,34 @@
+_base_: combined_core10_coverage_shared_preserve.yaml
+
+# Strict single-variable treatment: keep the Combined Top-10% locator,
+# shared preservation set, EOS CE, optimizer budget, and evaluation protocol;
+# replace only selected-core one-hot CE with full-vocabulary hard-Skill KL.
+train:
+  num_epochs: 1
+  batch_size: 1
+  accumulation: 2
+  seed: 1
+
+evaluation:
+  sel_env_num: 40
+  test_env_num: 0
+  eval_test: false
+
+env:
+  generation_batch_size: 8
+  checkpoint_eval_val: false
+
+soft_prefix:
+  prefix_length: 8
+  trajectory_examples_path: outputs/SpreadsheetBench_selective_stage2_manifests/combined_top0.10_core_coverage_ablation.jsonl
+  preservation_loss_weight: 1.0
+  preservation_label_field: preserve_indices
+  max_new_tokens: 4096
+  checkpoint_path: ""
+
+combined_full_vocab_kl:
+  core_label_field: selected_indices
+  preservation_label_field: preserve_indices
+  preservation_loss_weight: 1.0
+  kl_chunk_size: 8
+  eval_after_train: true

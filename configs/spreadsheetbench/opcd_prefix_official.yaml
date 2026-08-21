@@ -1,0 +1,32 @@
+_base_: selective_distillation_stage2.yaml
+
+# Official-Adapted OPCD: student on-policy trajectories, the hard-Skill teacher
+# on the exact same generated prefixes, and the upstream non-renormalized
+# Top-256 reverse-KL objective. Only the common length-8 prefix is trainable.
+train:
+  num_epochs: 1
+  batch_size: 1
+  accumulation: 2
+  seed: 1
+
+evaluation:
+  sel_env_num: 40
+  test_env_num: 0
+  eval_test: false
+
+env:
+  generation_batch_size: 8
+
+soft_prefix:
+  max_new_tokens: 4096
+
+official_baseline:
+  method: opcd
+  kl_topk: 256
+  kl_renorm_topk: false
+  rollout_temperature: 1.0
+  rollout_max_new_tokens: 4096
+  kl_chunk_size: 8
+  max_train_examples: 0
+  eval_after_train: true
+  official_root: third_party/official

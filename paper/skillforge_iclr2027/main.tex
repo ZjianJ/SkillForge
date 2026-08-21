@@ -1,0 +1,68 @@
+\documentclass{article}
+\usepackage{iclr2027_conference,times}
+\input{math_commands.tex}
+
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{placeins}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{xspace}
+\usepackage{microtype}
+\usepackage{url}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,calc}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+\definecolor{skillblue}{HTML}{2563EB}
+\definecolor{skillorange}{HTML}{EA580C}
+\definecolor{skillgreen}{HTML}{15803D}
+\definecolor{skillgray}{HTML}{64748B}
+\newcommand{\method}{\textsc{SkillForge}\xspace}
+\newcommand{\ours}{Combined-5\%+Preserve\xspace}
+\newcommand{\softskill}{\textsc{SoftSkill}\xspace}
+\newcommand{\skill}{\mathcal{S}}
+\newcommand{\traj}{\mathbf{y}}
+\newcommand{\prefix}{\mathbf{P}}
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+
+\title{SkillForge: Selective Behavioral-Delta Compression into Soft Prompts}
+
+% Keep \iclrfinalcopy commented for anonymous submission.
+\author{Anonymous Authors}
+
+% \iclrfinalcopy
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Textual skills can steer a frozen language-model agent, but repeatedly placing a long skill in context increases inference cost.  SoftSkill compresses such behavior into a short trainable prefix by applying next-token supervision to complete successful trajectories.  We ask whether a limited prefix should instead spend its capacity only where the textual skill changes the frozen model's behavior.  We introduce \method, a selective behavioral-compression framework.  On a successful trajectory, the same frozen model is teacher-forced twice, with and without the textual skill.  A token is scored by the product of its positive gold-token log-probability gain and the Jensen--Shannon divergence between the two full-vocabulary distributions.  We train only an eight-token soft prefix on the top-scoring 5\% of positions and regularize matched unselected positions toward the no-skill distribution.  On 61 successful SpreadsheetBench training trajectories, the top 5\% of tokens capture 84.05\% of positive skill-induced gain.  Under a matched 280-task test protocol, \method solves 101 tasks (36.07\%), versus 85 (30.36\%) for full-trajectory SoftSkill ($p=.0479$, exact McNemar).  The gain does not, however, significantly exceed the frozen no-skill model's 97 tasks (34.64\%, $p=.731$), revealing a teacher-forcing/free-generation gap.  Controlled negative results from window expansion and five residual-boosting variants further show that reducing trajectory loss or residual KL is not sufficient for executable agent behavior.  Our study provides a reproducible formulation, strong diagnostics, and a candid account of when selective skill compression helps---and where on-policy objectives remain necessary.
+\end{abstract}
+
+\input{sections/01_introduction}
+\input{sections/02_related_work}
+\input{sections/03_method}
+\input{sections/04_experiments}
+\input{sections/05_results}
+\input{sections/06_analysis}
+\input{sections/07_conclusion}
+
+\subsection*{AI use statement}
+Generative AI tools were used during methodology exploration, implementation assistance, experiment analysis and interpretation, literature discovery, drafting, and \LaTeX{} preparation.  They were not used to autonomously decide benchmark labels or to alter execution outcomes.  This is a working draft: all AI-assisted prose, citations, claims, code references, and numerical results must be independently checked by the authors before submission.  The authors retain responsibility for the final content and artifacts.
+
+\subsection*{Ethics statement}
+The work studies compression of user-provided behavioral instructions into continuous prompts.  Such compression can reduce transparency because a soft prompt is not human-readable, and the same mechanism could conceal undesirable instructions.  We therefore recommend retaining the source skill, checksum, training provenance, and task-level audit logs whenever a learned prefix is distributed.  SpreadsheetBench contains synthetic office tasks and does not require human-subject data.  Teacher trajectories were generated through a commercial API; users reproducing them should follow the provider's terms and avoid uploading private spreadsheets.
+
+\subsection*{Reproducibility statement}
+The repository records data splits, prompt and skill hashes, cached successful trajectories, model revision, selection masks, Top-64 distribution summaries, checkpoints, per-task execution verdicts, and paired significance tests.  Appendix~\ref{app:repro} specifies commands and configurations; Appendix~\ref{app:results} reports all completed variants, including negative results.  The supplemental project includes code and manifests but excludes model weights, API credentials, and licensed benchmark assets.  An anonymous code URL will be inserted before submission.
+
+\bibliography{references}
+\bibliographystyle{iclr2027_conference}
+
+\appendix
+\input{sections/appendix}
+
+\end{document}

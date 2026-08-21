@@ -1,0 +1,11 @@
+_base_: dynamic_additive_skill_full_vocab_skillkl_no_preservation_guard.yaml
+
+# Strict locator-only ablation against Dynamic Additive Skill v1.  Keep the
+# Top-10% support, equal-weight full-vocabulary Skill-KL, EOS/preservation
+# losses, optimizer schedule, initialization, Train61, and Val40 unchanged.
+dynamic_combined:
+  locator_method: gain_competitor
+  gain_weight: 0.75
+  core_ratio: 0.10
+  loss_weighting: equal
+  effective_core_ratio: 0.10

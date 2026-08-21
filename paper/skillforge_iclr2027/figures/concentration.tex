@@ -1,0 +1,26 @@
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.98\linewidth,
+    height=4.7cm,
+    xmin=0,xmax=20,
+    ymin=0,ymax=100,
+    xtick={1,2,5,10,20},
+    ytick={0,20,40,60,80,100},
+    xlabel={selected token budget (\%)},
+    ylabel={positive-gain mass (\%)},
+    grid=major,
+    legend style={font=\scriptsize,at={(0.98,0.05)},anchor=south east},
+    tick label style={font=\scriptsize},
+    label style={font=\small}
+]
+\addplot[color=skillblue,very thick,mark=*] coordinates {(1,42.11) (2,59.72) (5,84.05) (10,96.12) (20,99.76)};
+\addlegendentry{Positive locator}
+\addplot[color=skillgray,dashed,thick,mark=square*] coordinates {(1,0.99) (2,1.99) (5,4.99) (10,9.97) (20,19.84)};
+\addlegendentry{Random}
+\end{axis}
+\end{tikzpicture}
+\caption{Aggregate concentration on 61 successful training trajectories.  Skill-induced positive gold-token gain is highly concentrated under teacher forcing.}
+\label{fig:concentration}
+\end{figure}

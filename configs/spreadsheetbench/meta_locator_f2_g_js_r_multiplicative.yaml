@@ -1,0 +1,5 @@
+_base_: meta_locator_screen_base.yaml
+
+dynamic_combined:
+  locator_method: skill_effect_multiplicative
+  four_signal_weights: [0.50, 0.50, 0.00, 0.25]

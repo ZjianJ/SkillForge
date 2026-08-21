@@ -1,0 +1,25 @@
+_base_: selective_distillation_stage2.yaml
+
+train:
+  num_epochs: 1
+  batch_size: 1
+  accumulation: 2
+  seed: 1
+
+evaluation:
+  sel_env_num: 40
+  test_env_num: 0
+  eval_test: false
+
+env:
+  generation_batch_size: 8
+  checkpoint_eval_val: false
+
+soft_prefix:
+  prefix_length: 8
+  trajectory_examples_path: outputs/SpreadsheetBench_entropy_localization/manifests/combined_legacy_top0.05.jsonl
+  selective_label_field: selected_indices
+  preservation_loss_weight: 1.0
+  preservation_label_field: preserve_indices
+  max_new_tokens: 4096
+  checkpoint_path: ""

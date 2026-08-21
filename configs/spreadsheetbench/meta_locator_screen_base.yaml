@@ -1,0 +1,33 @@
+_base_: dynamic_additive_skill_full_vocab_skillkl_no_preservation_guard.yaml
+
+# Monitor-only screening contract for the adaptive four-signal locator study.
+# Exactly 49 trajectories update the prefix; the fixed 12 monitor trajectories
+# never backpropagate.  Val40 and Test280 are disabled during screening.
+evaluation:
+  sel_env_num: 0
+  test_env_num: 0
+  eval_test: false
+
+dynamic_combined:
+  core_ratio: 0.10
+  loss_weighting: equal
+  effective_core_ratio: 0.10
+  stop_mass_metric: full_vocab_kl
+  preservation_loss_weight: 1.0
+  preservation_guard_enabled: false
+
+  monitor_trajectories: 12
+  holdout_monitor_from_training: true
+  monitor_scope: global
+  monitor_skill_kl_weight: 1.0
+  monitor_preservation_weight: 1.0
+  monitor_gold_nll_weight: 0.1
+  monitor_interval_steps: 32
+  min_steps_per_stage: 32
+  max_steps_per_stage: 32
+  monitor_patience: 100
+  min_relative_monitor_improvement: 0.0
+
+  max_relocations: 1
+  global_patience: 100
+  eval_after_train: false

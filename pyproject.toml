@@ -3,14 +3,14 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "softskill"
+name = "skillforge-softskill"
 version = "0.1.0"
-description = "SoftSkill: soft-prefix skill optimization with SkillOpt-compatible imports"
+description = "SkillForge: selective soft-prompt distillation for frozen language-model agents"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
-    {name = "SoftSkill contributors"},
+    {name = "SkillForge contributors"},
 ]
 keywords = ["agent", "prompt-optimization", "soft-prefix", "skill-learning", "LLM", "agentic"]
 classifiers = [
@@ -56,10 +56,10 @@ skillopt-eval = "scripts.eval_only:main"
 skillopt-train-soft-prefix = "scripts.train_soft_prefix:main"
 
 [project.urls]
-Homepage = "https://github.com/xijia-tao/SoftSkill"
-Documentation = "https://xijia-tao.github.io/SoftSkill"
-Repository = "https://github.com/xijia-tao/SoftSkill"
-Issues = "https://github.com/xijia-tao/SoftSkill/issues"
+Homepage = "https://github.com/ZjianJ/SkillForge"
+Documentation = "https://github.com/ZjianJ/SkillForge/tree/main/docs"
+Repository = "https://github.com/ZjianJ/SkillForge"
+Issues = "https://github.com/ZjianJ/SkillForge/issues"
 
 [tool.setuptools.packages.find]
 include = ["skillopt*", "scripts*"]
@@ -71,3 +71,7 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
 ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["third_party", "outputs", "rollouts", "external"]

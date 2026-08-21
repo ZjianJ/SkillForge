@@ -1,0 +1,16 @@
+\begin{table}[t]
+\caption{Matched SpreadsheetBench test results.  All methods use the same frozen Qwen checkpoint, 280 tasks, greedy decoding, batch size 2, and an 8,192-token cap.  $\Delta$ is relative to full-trajectory SoftSkill.}
+\label{tab:test-main}
+\centering
+\small
+\begin{tabular}{lrrr}
+\toprule
+Method & Solved & Success (\%) & $\Delta$ (pp) \\
+\midrule
+No Skill & 97/280 & 34.64 & +4.29 \\
+Full-trajectory SoftSkill & 85/280 & 30.36 & -- \\
+PRCB-v5 & 96/280 & 34.29 & +3.93 \\
+\textbf{Combined-5\%+Preserve} & \textbf{101/280} & \textbf{36.07} & \textbf{+5.71} \\
+\bottomrule
+\end{tabular}
+\end{table}

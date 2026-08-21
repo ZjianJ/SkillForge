@@ -28,6 +28,7 @@ outputs/
 rollouts/
 logs/
 external/
+third_party/official/
 .gradio/
 
 # Local benchmark checkouts and corpora.

@@ -1,0 +1,27 @@
+\section{Results}
+\label{sec:results}
+
+\subsection{The skill effect is sparse on successful contexts}
+Figure~\ref{fig:concentration} answers RQ1.  The top 1\% of positions capture 42.11\% of aggregate positive gain; the top 5\% capture 84.05\%; and the top 10\% capture 96.12\%.  All 61 trajectories individually satisfy $\mathcal{C}(10\%)\geq 0.6$ and $\mathcal{C}(20\%)\geq 0.8$.  Random selection closely tracks its nominal budget.  This strongly supports localization, although it does not establish controllability by a short prefix.
+
+\input{figures/concentration}
+
+Positive and Combined select overlapping but non-identical cores (mean Jaccard 0.697).  At 5\%, Positive captures more realized gain (81.91\% vs.\ 76.23\%), whereas Combined captures more JS mass (50.61\% vs.\ 44.69\%) and combined-score mass (97.56\% vs.\ 95.90\%).  Full-distribution information therefore shifts capacity toward positions where the skill changes alternatives beyond the observed token.
+
+\subsection{Selective compression improves over full-trajectory SoftSkill}
+
+\input{tables/main_test}
+
+Table~\ref{tab:test-main} answers RQ2.  Combined-5\%+Preserve solves 101/280 test tasks, 16 more than full-trajectory SoftSkill.  The paired difference is significant under an exact McNemar test ($p=.0479$).  The improvement is entirely on cell-level tasks (61 vs.\ 45 of 193); both solve 40 of 87 sheet-level tasks.  This suggests that sparse instruction transfer helps local edits more than global workbook transformations.
+
+The strongest conclusion is relative to the matched full-trajectory baseline, not the base model.  No Skill solves 97 tasks, and the four-task net advantage of Combined is not significant ($40$ Combined-only vs.\ $36$ no-skill-only, $p=.731$).  PRCB-v5 reaches 96/280 and likewise does not outperform No Skill.  Selectivity recovers the degradation introduced by indiscriminate trajectory fitting, but does not yet robustly add skill beyond the base model's existing competence.
+
+\subsection{Validation ablations}
+
+\input{tables/validation}
+
+Table~\ref{tab:validation} answers RQ3.  With independent preservation sets, Positive-5\%+Preserve reaches 18/40 versus 15/40 for matched Random-5\%+Preserve.  In the stricter paired comparison with the same preservation indices, Combined improves over Positive (16/40 vs.\ 10/40), but the exact paired test is inconclusive ($p=.146$).  Expanding each Positive core by a left-2/right-8 window increases CE coverage from 5.06\% to 35.25\% yet reduces success to 12/40.  More local context is therefore not automatically better; it reintroduces abundant low-specificity targets and changes the loss scale.
+
+\subsection{Task-specific capacity oracle}
+
+To separate shared-prefix interference from representational limits, we train one prefix for each of the 61 successful training tasks and freely regenerate the \emph{same} task.  Combined core-only selection at 10\% solves 35/61 (57.38\%), compared with 32/61 (52.46\%) for the hard textual skill and 26/61 (42.62\%) for No Skill.  Five percent solves 28/61 and 20\% solves 33/61.  This is an oracle memorization/closure test, not held-out evidence, but it shows that an eight-token prefix can sometimes turn teacher-forced fitting into a successful rollout when cross-task interference is removed.  The non-monotonic 5/10/20\% curve also rules out ``insufficient token coverage'' as the sole explanation.

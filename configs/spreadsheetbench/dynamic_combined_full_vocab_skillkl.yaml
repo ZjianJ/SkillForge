@@ -1,0 +1,43 @@
+_base_: combined_core10_full_vocab_skillkl_shared_preserve.yaml
+
+# Dynamic Combined v1: recompute the hard-Skill/current-prefix residual after
+# each locally converged stage.  Test remains disabled during training.
+evaluation:
+  sel_env_num: 40
+  test_env_num: 0
+  eval_test: false
+
+env:
+  generation_batch_size: 8
+  checkpoint_eval_val: false
+
+soft_prefix:
+  trajectory_examples_path: outputs/SpreadsheetBench_selective_stage2_manifests/combined_top0.10_core_coverage_ablation.jsonl
+  checkpoint_path: ""
+  max_new_tokens: 4096
+
+dynamic_combined:
+  core_ratio: 0.10
+  exclude_preservation_from_core: true
+  kl_chunk_size: 8
+  preservation_loss_weight: 1.0
+
+  # Fixed teacher-forced stage monitor. Monitor passes never backpropagate and
+  # never use Val40/Test280; the same tasks remain in train61 to keep support
+  # matched to the static Combined10 baseline.
+  monitor_trajectories: 12
+  monitor_interval_steps: 4
+  min_steps_per_stage: 8
+  max_steps_per_stage: 32
+  monitor_patience: 3
+  min_relative_monitor_improvement: 0.002
+
+  # Initial localization is round 0; this permits four fresh re-localizations.
+  max_relocations: 4
+  residual_mass_ratio_threshold: 0.10
+  mean_eligible_kl_threshold: 0.02
+  min_relative_mass_improvement: 0.002
+  global_patience: 2
+  max_preservation_degradation: 0.10
+
+  eval_after_train: true

@@ -1,0 +1,10 @@
+_base_: dynamic_additive_skill_full_vocab_skillkl_no_preservation_guard.yaml
+
+# Experiment A: change only the selected-core loss from equal token weights to
+# detached dynamic Additive locator weights.  The weights are normalized per
+# trajectory to the original Top-10% token mass, so EOS/preservation strength,
+# selected support, optimization schedule, and validation protocol stay fixed.
+dynamic_combined:
+  core_ratio: 0.10
+  loss_weighting: locator_score
+  effective_core_ratio: 0.10

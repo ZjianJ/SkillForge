@@ -1,0 +1,17 @@
+\section{Experimental Setup}
+\label{sec:setup}
+
+\paragraph{Benchmarks.}
+Our main study uses SpreadsheetBench Verified~\citep{ma2024spreadsheetbench}, in which the model receives a natural-language spreadsheet-editing request and must produce Python whose execution yields the required workbook.  We use the repository's fixed 80/40/280 train/validation/test split.  A GPT-5.5 API service generated one hard-skill-conditioned trajectory per training task; execution filtering retained 61 successes (42/53 cell-level and 19/27 sheet-level tasks), containing 54,929 target tokens.  No failed trajectory is used for localization or training.  SearchQA is retained as a reproduction check of the inherited SoftSkill pipeline, not as evidence for our selective method.
+
+\paragraph{Model and prefix.}
+All SpreadsheetBench compression and free-generation results use the same local Qwen3.6-35B-A3B checkpoint~\citep{qwen2026qwen36}.  Its input embedding width is 2,048.  A length-8 prefix therefore contains 16,384 trainable values; all model parameters are frozen.  Unless stated otherwise, we use AdamW, learning rate $10^{-3}$, batch size 1 with two-step accumulation, BF16, gradient checkpointing, seed 1, and text initialization.  The core selector uses $\rho=5\%$, exact JS, and seed 1.  Main training runs one epoch and supervises 2,838 tokens including EOS, with 2,777 matched preservation positions.  The longest cached target is 3,647 tokens.
+
+\paragraph{Baselines.}
+\textbf{No Skill} evaluates the frozen model with only the task.  \textbf{Full-trajectory SoftSkill} trains the same length-8 prefix on every trajectory token.  \textbf{Random-5\%} replaces the locator with a matched random mask.  \textbf{Positive-5\%} ranks only by Equation~\ref{eq:gain}.  \textbf{Combined-5\%} uses Equation~\ref{eq:combined}.  Preservation variants add Equation~\ref{eq:preserve}.  Local-window variants expand each selected core by a fixed left/right radius.  Task-specific oracle experiments train one independent prefix per successful training task and then freely generate on that same task; they measure closure, not generalization.
+
+\paragraph{Evaluation protocol.}
+The final system receives a prefix and task, freely generates code greedily, executes it in the benchmark environment, and is successful only if the resulting workbook passes the task checker.  The main 280-task test comparison uses the same batch size 2, 8,192-token generation cap, frozen model revision, and execution environment.  We report exact paired McNemar tests; because one seed and one benchmark are available, confidence claims are deliberately limited.  Validation selection uses only the 40-task validation split.  The final Combined configuration is frozen before its single test run.  All task-specific oracle experiments explicitly set \texttt{test\_split\_accessed=false}.
+
+\paragraph{Research questions.}
+We ask: \textbf{RQ1}, is the hard skill's effect concentrated on a small fraction of successful-trajectory tokens?  \textbf{RQ2}, does selective training improve over full-trajectory CE?  \textbf{RQ3}, do full-distribution localization and no-skill preservation matter?  \textbf{RQ4}, why do improved teacher-forced objectives fail to translate monotonically to execution success?

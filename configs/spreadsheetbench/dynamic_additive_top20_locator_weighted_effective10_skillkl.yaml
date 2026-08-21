@@ -1,0 +1,9 @@
+_base_: dynamic_additive_skill_full_vocab_skillkl_no_preservation_guard.yaml
+
+# Conditional Experiment B: expose the loss to Top-20% positions while
+# normalizing their detached locator weights to the effective mass of Top-10%.
+# Run only if Experiment A improves on the 16/40 equal-weight baseline.
+dynamic_combined:
+  core_ratio: 0.20
+  loss_weighting: locator_score
+  effective_core_ratio: 0.10
